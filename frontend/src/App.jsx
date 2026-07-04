@@ -1,10 +1,24 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import axios from "axios";
 import { Link, Navigate, Route, Routes } from "react-router-dom";
 import MovieDetails from "./MovieDetails";
 import "./App.css";
 
 const API_URL = "http://127.0.0.1:8000";
+const DEFAULT_GENRES = [
+  "All",
+  "Action",
+  "Adventure",
+  "Animation",
+  "Comedy",
+  "Crime",
+  "Drama",
+  "Fantasy",
+  "Horror",
+  "Romance",
+  "Sci-Fi",
+  "Thriller",
+];
 
 function FilmIcon() {
   return (
@@ -89,6 +103,20 @@ function MovieCard({ movie }) {
   );
 }
 
+function MovieCardSkeleton() {
+  return (
+    <div className="movie-card movie-card-skeleton" aria-hidden="true">
+      <div className="skeleton-poster skeleton-shimmer" />
+      <div className="skeleton-details">
+        <span className="skeleton-line skeleton-title skeleton-shimmer" />
+        <span className="skeleton-line skeleton-meta skeleton-shimmer" />
+        <span className="skeleton-line skeleton-copy skeleton-shimmer" />
+        <span className="skeleton-line skeleton-copy-short skeleton-shimmer" />
+      </div>
+    </div>
+  );
+}
+
 function Home() {
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedMovie, setSelectedMovie] = useState("");
@@ -99,15 +127,76 @@ function Home() {
   });
   const [isSuggestionsOpen, setIsSuggestionsOpen] = useState(false);
   const [activeSuggestion, setActiveSuggestion] = useState(-1);
+  const [trendingState, setTrendingState] = useState({
+    status: "loading",
+    movies: [],
+  });
+  const [genreState, setGenreState] = useState({
+    status: "loading",
+    genres: DEFAULT_GENRES,
+  });
+  const [selectedGenre, setSelectedGenre] = useState("All");
   const [recommendations, setRecommendations] = useState([]);
+  const [recommendationContext, setRecommendationContext] = useState({
+    movieTitle: "",
+    genre: "All",
+  });
   const [isRecommending, setIsRecommending] = useState(false);
   const [error, setError] = useState("");
+  const recommendationsRef = useRef(null);
+  const shouldScrollToRecommendations = useRef(false);
 
   const searchQuery = searchTerm.trim();
   const hasCurrentResponse = searchResponse.query === searchQuery;
   const suggestions = hasCurrentResponse ? searchResponse.results : [];
   const isSearching =
     isSuggestionsOpen && Boolean(searchQuery) && !hasCurrentResponse;
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    axios
+      .get(`${API_URL}/trending`, { signal: controller.signal })
+      .then((response) => {
+        setTrendingState({
+          status: "success",
+          movies: response.data.results || [],
+        });
+      })
+      .catch((requestError) => {
+        if (requestError.code !== "ERR_CANCELED") {
+          setTrendingState({ status: "error", movies: [] });
+        }
+      });
+
+    return () => controller.abort();
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    axios
+      .get(`${API_URL}/genres`, { signal: controller.signal })
+      .then((response) => {
+        const genres = Array.isArray(response.data.genres)
+          ? response.data.genres.filter(
+              (genre) => typeof genre === "string" && genre.trim(),
+            )
+          : [];
+
+        setGenreState({
+          status: "success",
+          genres: genres.length > 0 ? genres : DEFAULT_GENRES,
+        });
+      })
+      .catch((requestError) => {
+        if (requestError.code !== "ERR_CANCELED") {
+          setGenreState({ status: "error", genres: DEFAULT_GENRES });
+        }
+      });
+
+    return () => controller.abort();
+  }, []);
 
   useEffect(() => {
     if (!isSuggestionsOpen || !searchQuery) return undefined;
@@ -142,6 +231,25 @@ function Home() {
       controller.abort();
     };
   }, [isSuggestionsOpen, searchQuery]);
+
+  useEffect(() => {
+    if (
+      !shouldScrollToRecommendations.current ||
+      recommendations.length === 0
+    ) {
+      return;
+    }
+
+    shouldScrollToRecommendations.current = false;
+    const prefersReducedMotion = window.matchMedia(
+      "(prefers-reduced-motion: reduce)",
+    ).matches;
+
+    recommendationsRef.current?.scrollIntoView({
+      behavior: prefersReducedMotion ? "auto" : "smooth",
+      block: "start",
+    });
+  }, [recommendations]);
 
   const selectSuggestion = (movieTitle) => {
     setSearchTerm(movieTitle);
@@ -183,6 +291,14 @@ function Home() {
     }
   };
 
+  const selectGenre = (genre) => {
+    if (genre === selectedGenre) return;
+
+    setSelectedGenre(genre);
+    setRecommendations([]);
+    setError("");
+  };
+
   const getRecommendations = async (event) => {
     event.preventDefault();
 
@@ -196,6 +312,7 @@ function Home() {
     try {
       const res = await axios.get(
         `${API_URL}/recommend/${encodeURIComponent(movieTitle)}`,
+        { params: { genre: selectedGenre } },
       );
 
       if (res.data.error) {
@@ -204,9 +321,26 @@ function Home() {
         return;
       }
 
-      setRecommendations(res.data.recommendations || []);
-    } catch {
-      setError("Something interrupted the search. Please give it another try.");
+      const receivedRecommendations = res.data.recommendations || [];
+      setRecommendationContext({ movieTitle, genre: selectedGenre });
+
+      if (receivedRecommendations.length > 0) {
+        shouldScrollToRecommendations.current = true;
+        setRecommendations(receivedRecommendations);
+      } else {
+        setRecommendations([]);
+        setError(
+          `No ${selectedGenre === "All" ? "" : `${selectedGenre} `}recommendations found for ${movieTitle}. Try another genre.`,
+        );
+      }
+    } catch (requestError) {
+      const detail = requestError.response?.data?.detail;
+      setRecommendations([]);
+      setError(
+        typeof detail === "string"
+          ? detail
+          : "Something interrupted the search. Please give it another try.",
+      );
     } finally {
       setIsRecommending(false);
     }
@@ -331,6 +465,33 @@ function Home() {
               {isRecommending ? "Finding matches…" : "Recommend"}
             </button>
           </div>
+
+          <fieldset
+            className="genre-filter"
+            aria-busy={genreState.status === "loading"}
+          >
+            <legend>Filter recommendations by genre</legend>
+            <div className="genre-chips">
+              {genreState.genres.map((genre) => (
+                <button
+                  className={`genre-chip ${
+                    selectedGenre === genre ? "is-active" : ""
+                  }`}
+                  type="button"
+                  aria-pressed={selectedGenre === genre}
+                  key={genre}
+                  onClick={() => selectGenre(genre)}
+                >
+                  {genre}
+                </button>
+              ))}
+            </div>
+            {genreState.status === "error" && (
+              <p className="genre-status">
+                Using the standard genre collection.
+              </p>
+            )}
+          </fieldset>
         </form>
 
         {error && (
@@ -339,20 +500,33 @@ function Home() {
           </p>
         )}
 
-        <section className="results" aria-live="polite">
-          <div className="results-heading">
-            <div>
-              <p className="section-kicker">Made for you</p>
-              <h2>Your recommendations</h2>
-            </div>
-            {recommendations.length > 0 && (
+        {recommendations.length > 0 && (
+          <section
+            className="results recommendations-section"
+            ref={recommendationsRef}
+            aria-live="polite"
+          >
+            <div className="results-heading">
+              <div>
+                <p className="section-kicker">Made for you</p>
+                <h2>
+                  Recommended for{" "}
+                  <span className="recommendation-title">
+                    {recommendationContext.movieTitle}
+                  </span>
+                </h2>
+                <p className="section-subtitle">
+                  Based on your selected movie and genre filter
+                </p>
+              </div>
               <span className="result-count">
-                {recommendations.length} movies
+                {recommendations.length}{" "}
+                {recommendationContext.genre === "All"
+                  ? "movies"
+                  : `${recommendationContext.genre} matches`}
               </span>
-            )}
-          </div>
+            </div>
 
-          {recommendations.length > 0 ? (
             <div className="movie-grid">
               {recommendations.map((movie, index) => (
                 <MovieCard
@@ -361,15 +535,50 @@ function Home() {
                 />
               ))}
             </div>
-          ) : (
-            <div className="empty-state">
-              <div className="empty-icon">
-                <SparkleIcon />
+          </section>
+        )}
+
+        <section
+          className="results trending-section"
+          aria-live="polite"
+          aria-busy={trendingState.status === "loading"}
+        >
+          <div className="results-heading">
+            <div>
+              <p className="section-kicker">Popular on TMDB</p>
+              <h2>Trending Today</h2>
+            </div>
+            {trendingState.status === "success" &&
+              trendingState.movies.length > 0 && (
+                <span className="result-count">Updated daily</span>
+              )}
+          </div>
+
+          {trendingState.status === "loading" ? (
+            <div className="movie-grid trending-grid">
+              {Array.from({ length: 8 }, (_, index) => (
+                <MovieCardSkeleton key={index} />
+              ))}
+            </div>
+          ) : trendingState.status === "error" ? (
+            <div className="trending-error" role="alert">
+              <div className="trending-error-icon">
+                <FilmIcon />
               </div>
               <div>
-                <h3>Your watchlist starts here</h3>
-                <p>Select a movie above to reveal recommendations.</p>
+                <h3>Trending movies are taking a break</h3>
+                <p>Please refresh the page in a moment.</p>
               </div>
+            </div>
+          ) : trendingState.movies.length > 0 ? (
+            <div className="movie-grid trending-grid">
+              {trendingState.movies.map((movie, index) => (
+                <MovieCard movie={movie} key={`${movie.id}-${index}`} />
+              ))}
+            </div>
+          ) : (
+            <div className="trending-error">
+              No trending movies are available right now.
             </div>
           )}
         </section>

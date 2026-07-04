@@ -1,4 +1,5 @@
 import os
+import json
 from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
 from pathlib import Path
@@ -13,6 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 BASE_DIR = Path(__file__).resolve().parent
 TMDB_SEARCH_URL = "https://api.themoviedb.org/3/search/movie"
+TMDB_TRENDING_URL = "https://api.themoviedb.org/3/trending/movie/day"
 TMDB_IMAGE_BASE_URL = "https://image.tmdb.org/t/p/w500"
 TMDB_ORIGINAL_IMAGE_BASE_URL = "https://image.tmdb.org/t/p/original"
 
@@ -34,6 +36,61 @@ sig = joblib.load(BASE_DIR / "dumped_obj" / "sigmoid_kernel.pkl")
 
 indices = pd.Series(data.index, index=data["original_title"]).drop_duplicates()
 movie_titles = list(dict.fromkeys(data["original_title"].dropna().astype(str)))
+
+DEFAULT_GENRES = [
+    "All",
+    "Action",
+    "Adventure",
+    "Animation",
+    "Comedy",
+    "Crime",
+    "Drama",
+    "Fantasy",
+    "Horror",
+    "Romance",
+    "Sci-Fi",
+    "Thriller",
+]
+
+
+def _parse_genres(raw_genres) -> tuple[str, ...]:
+    """Convert the dataset's serialized TMDB genre objects into clean names."""
+    if raw_genres is None or (isinstance(raw_genres, float) and pd.isna(raw_genres)):
+        return ()
+
+    try:
+        genres = json.loads(raw_genres) if isinstance(raw_genres, str) else raw_genres
+    except (json.JSONDecodeError, TypeError):
+        return ()
+
+    if not isinstance(genres, list):
+        return ()
+
+    names = []
+    for genre in genres:
+        name = genre.get("name") if isinstance(genre, dict) else genre
+        if not isinstance(name, str) or not name.strip():
+            continue
+
+        clean_name = "Sci-Fi" if name.strip().casefold() == "science fiction" else name.strip()
+        names.append(clean_name)
+
+    return tuple(dict.fromkeys(names))
+
+
+movie_genres = dataframe["genres"].apply(_parse_genres)
+dataset_genres = {genre for genres in movie_genres for genre in genres}
+
+if dataset_genres:
+    preferred_genres = [
+        genre for genre in DEFAULT_GENRES[1:] if genre in dataset_genres
+    ]
+    additional_genres = sorted(
+        dataset_genres.difference(preferred_genres), key=str.casefold
+    )
+    available_genres = ["All", *preferred_genres, *additional_genres]
+else:
+    available_genres = DEFAULT_GENRES
 
 
 def _movie_fallback(title: str) -> dict:
@@ -224,8 +281,61 @@ def search_movies(query: str = ""):
     return {"results": results}
 
 
+@app.get("/genres")
+def get_genres():
+    return {"genres": available_genres}
+
+
+@app.get("/trending")
+def trending_movies():
+    if not TMDB_API_KEY or TMDB_API_KEY == "your_key_here":
+        raise HTTPException(
+            status_code=503,
+            detail="TMDB API key is not configured on the backend.",
+        )
+
+    try:
+        response = requests.get(
+            TMDB_TRENDING_URL,
+            params={"api_key": TMDB_API_KEY},
+            timeout=8,
+        )
+        response.raise_for_status()
+        movies = response.json().get("results") or []
+
+        results = [
+            {
+                "id": movie.get("id"),
+                "title": (
+                    movie.get("title")
+                    or movie.get("original_title")
+                    or "Untitled"
+                ),
+                "poster_url": _tmdb_image_url(movie.get("poster_path")),
+                "backdrop_url": _tmdb_image_url(
+                    movie.get("backdrop_path"), original=True
+                ),
+                "release_date": movie.get("release_date") or "",
+                "vote_average": movie.get("vote_average"),
+                "overview": movie.get("overview") or "",
+            }
+            for movie in movies[:12]
+        ]
+        return {"results": results}
+    except requests.HTTPError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail="TMDB could not provide trending movies right now.",
+        ) from exc
+    except (requests.RequestException, ValueError, TypeError, AttributeError) as exc:
+        raise HTTPException(
+            status_code=502,
+            detail="Unable to fetch trending movies from TMDB.",
+        ) from exc
+
+
 @app.get("/recommend/{movie_title}")
-def recommend(movie_title: str):
+def recommend(movie_title: str, genre: str | None = None):
     if movie_title not in indices:
         return {"error": "Movie not found"}
 
@@ -233,6 +343,31 @@ def recommend(movie_title: str):
     scores = list(enumerate(sig[idx]))
     scores = sorted(scores, key=lambda x: x[1], reverse=True)[1:11]
     movie_indices = [i[0] for i in scores]
+
+    requested_genre = (genre or "All").strip()
+    normalized_genre = requested_genre.casefold()
+
+    if normalized_genre and normalized_genre != "all":
+        genre_lookup = {
+            available_genre.casefold(): available_genre
+            for available_genre in available_genres[1:]
+        }
+        canonical_genre = genre_lookup.get(normalized_genre)
+
+        if canonical_genre is None:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unknown genre: {requested_genre}",
+            )
+
+        movie_indices = [
+            movie_index
+            for movie_index in movie_indices
+            if any(
+                movie_genre.casefold() == canonical_genre.casefold()
+                for movie_genre in movie_genres.iloc[movie_index]
+            )
+        ]
 
     recommendation_titles = (
         dataframe["original_title"].iloc[movie_indices].dropna().tolist()
