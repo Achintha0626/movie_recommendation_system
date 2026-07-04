@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import axios from "axios";
 import { Link, Navigate, NavLink, Route, Routes } from "react-router-dom";
+import Dashboard from "./Dashboard";
 import MovieDetails from "./MovieDetails";
+import useMovieActivity from "./useMovieActivity";
 import useMovieCollections from "./useMovieCollections";
 import "./App.css";
 
@@ -93,6 +95,9 @@ function SiteNav({ favoritesCount, watchlistCount }) {
         <NavLink className={navClass} to="/watchlist">
           Watchlist
           {watchlistCount > 0 && <span>{watchlistCount}</span>}
+        </NavLink>
+        <NavLink className={navClass} to="/dashboard">
+          Dashboard
         </NavLink>
       </div>
     </nav>
@@ -267,7 +272,25 @@ function MovieCardSkeleton() {
   );
 }
 
-function Home({ collections }) {
+function formatRelativeTime(timestamp) {
+  const elapsed = Math.max(0, Date.now() - Number(timestamp || 0));
+  const minutes = Math.floor(elapsed / 60000);
+  const hours = Math.floor(elapsed / 3600000);
+  const days = Math.floor(elapsed / 86400000);
+
+  if (minutes < 1) return "Just now";
+  if (minutes < 60) return `${minutes} ${minutes === 1 ? "minute" : "minutes"} ago`;
+  if (hours < 24) return `${hours} ${hours === 1 ? "hour" : "hours"} ago`;
+  if (days === 1) return "Yesterday";
+  if (days < 7) return `${days} days ago`;
+
+  return new Date(timestamp).toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+  });
+}
+
+function Home({ activity, collections }) {
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedMovie, setSelectedMovie] = useState("");
   const [searchResponse, setSearchResponse] = useState({
@@ -449,6 +472,21 @@ function Home({ collections }) {
     setError("");
   };
 
+  const restoreHistoryItem = (item) => {
+    setSearchTerm(item.searchedMovie);
+    setSelectedMovie(item.searchedMovie);
+    setSelectedGenre(item.selectedGenre);
+    setRecommendationContext({
+      movieTitle: item.searchedMovie,
+      genre: item.selectedGenre,
+    });
+    setError("");
+    setIsSuggestionsOpen(false);
+    setActiveSuggestion(-1);
+    shouldScrollToRecommendations.current = true;
+    setRecommendations([...item.recommendations]);
+  };
+
   const getRecommendations = async (event) => {
     event.preventDefault();
 
@@ -475,6 +513,11 @@ function Home({ collections }) {
       setRecommendationContext({ movieTitle, genre: selectedGenre });
 
       if (receivedRecommendations.length > 0) {
+        activity.addRecommendationHistory({
+          searchedMovie: movieTitle,
+          selectedGenre,
+          recommendations: receivedRecommendations,
+        });
         shouldScrollToRecommendations.current = true;
         setRecommendations(receivedRecommendations);
       } else {
@@ -742,6 +785,109 @@ function Home({ collections }) {
             </div>
           )}
         </section>
+
+        {activity.recentlyViewed.length > 0 && (
+          <section className="results recently-viewed-section">
+            <div className="results-heading">
+              <div>
+                <p className="section-kicker">Pick up where you left off</p>
+                <h2>Recently Viewed</h2>
+              </div>
+              <span className="result-count">
+                {activity.recentlyViewed.length} recent
+              </span>
+            </div>
+
+            <div className="movie-grid recently-viewed-grid">
+              {activity.recentlyViewed.map((movie) => (
+                <MovieCard
+                  movie={movie}
+                  collections={collections}
+                  key={movie.id}
+                />
+              ))}
+            </div>
+          </section>
+        )}
+
+        <section className="results history-section">
+          <div className="results-heading history-heading">
+            <div>
+              <p className="section-kicker">Return to an earlier search</p>
+              <h2>Recommendation History</h2>
+            </div>
+            {activity.recommendationHistory.length > 0 && (
+              <button
+                className="clear-history-button"
+                type="button"
+                onClick={activity.clearRecommendationHistory}
+              >
+                <TrashIcon /> Clear all history
+              </button>
+            )}
+          </div>
+
+          {activity.recommendationHistory.length > 0 ? (
+            <div className="history-grid">
+              {activity.recommendationHistory.map((item) => (
+                <article
+                  className="history-card"
+                  key={`${item.searchedMovie}-${item.selectedGenre}`}
+                >
+                  <button
+                    className="history-restore-button"
+                    type="button"
+                    onClick={() => restoreHistoryItem(item)}
+                  >
+                    <div className="history-card-topline">
+                      <span className="history-icon">
+                        <SparkleIcon />
+                      </span>
+                      <time dateTime={new Date(item.createdAt).toISOString()}>
+                        {formatRelativeTime(item.createdAt)}
+                      </time>
+                    </div>
+                    <h3>{item.searchedMovie}</h3>
+                    <div className="history-meta">
+                      <span>{item.selectedGenre}</span>
+                      <span>
+                        {item.recommendations.length}{" "}
+                        {item.recommendations.length === 1
+                          ? "recommendation"
+                          : "recommendations"}
+                      </span>
+                    </div>
+                    <span className="history-restore-label">
+                      Restore recommendations →
+                    </span>
+                  </button>
+                  <button
+                    className="history-delete-button"
+                    type="button"
+                    aria-label={`Delete history for ${item.searchedMovie}`}
+                    title="Delete history item"
+                    onClick={() =>
+                      activity.removeHistoryItem(
+                        item.searchedMovie,
+                        item.selectedGenre,
+                      )
+                    }
+                  >
+                    <TrashIcon />
+                  </button>
+                </article>
+              ))}
+            </div>
+          ) : (
+            <div className="history-empty">
+              <SparkleIcon />
+              <div>
+                <h3>No recommendation history yet</h3>
+                <p>Your successful movie searches will appear here.</p>
+              </div>
+            </div>
+          )}
+        </section>
       </section>
 
       <footer>
@@ -832,11 +978,15 @@ function SavedMoviesPage({ collection, collections }) {
 }
 
 function App() {
+  const activity = useMovieActivity();
   const collections = useMovieCollections();
 
   return (
     <Routes>
-      <Route path="/" element={<Home collections={collections} />} />
+      <Route
+        path="/"
+        element={<Home activity={activity} collections={collections} />}
+      />
       <Route
         path="/favorites"
         element={
@@ -849,7 +999,25 @@ function App() {
           <SavedMoviesPage collection="watchlist" collections={collections} />
         }
       />
-      <Route path="/movie/:id" element={<MovieDetails />} />
+      <Route
+        path="/dashboard"
+        element={
+          <Dashboard
+            activity={activity}
+            collections={collections}
+            navigation={
+              <SiteNav
+                favoritesCount={collections.favorites.length}
+                watchlistCount={collections.watchlist.length}
+              />
+            }
+          />
+        }
+      />
+      <Route
+        path="/movie/:id"
+        element={<MovieDetails onMovieViewed={activity.addRecentlyViewed} />}
+      />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

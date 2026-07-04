@@ -45,7 +45,7 @@ function formatRuntime(runtime) {
   return hours ? `${hours}h ${minutes}m` : `${minutes}m`;
 }
 
-function MovieDetails() {
+function MovieDetails({ onMovieViewed }) {
   const { id } = useParams();
   const hasValidId = /^\d+$/.test(id || "");
   const [requestState, setRequestState] = useState({
@@ -69,6 +69,7 @@ function MovieDetails() {
       .get(`${API_URL}/movie/${id}`, { signal: controller.signal })
       .then((response) => {
         setRequestState({ id, movie: response.data, error: "" });
+        onMovieViewed(response.data);
       })
       .catch((requestError) => {
         if (requestError.code !== "ERR_CANCELED") {
@@ -85,7 +86,7 @@ function MovieDetails() {
       });
 
     return () => controller.abort();
-  }, [hasValidId, id]);
+  }, [hasValidId, id, onMovieViewed]);
 
   useEffect(() => {
     if (!movie?.title) return undefined;
@@ -160,6 +161,9 @@ function MovieDetails() {
             </Link>
             <Link className="details-nav-link" to="/watchlist">
               Watchlist
+            </Link>
+            <Link className="details-nav-link" to="/dashboard">
+              Dashboard
             </Link>
             <span className="details-brand">
               <FilmIcon /> CineMatch

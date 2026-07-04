@@ -509,11 +509,7 @@
   }
 
   .details-brand {
-    font-size: 0;
-  }
-
-  .details-brand svg {
-    width: 24px;
+    display: none;
   }
 
   .details-nav-right {
