@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import axios from "axios";
-import { Link, Navigate, Route, Routes } from "react-router-dom";
+import { Link, Navigate, NavLink, Route, Routes } from "react-router-dom";
 import MovieDetails from "./MovieDetails";
+import useMovieCollections from "./useMovieCollections";
 import "./App.css";
 
 const API_URL = "http://127.0.0.1:8000";
@@ -45,7 +46,60 @@ function SearchIcon() {
   );
 }
 
-function MovieCard({ movie }) {
+function HeartIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M20.8 5.8a5.3 5.3 0 0 0-7.5 0L12 7.1l-1.3-1.3a5.3 5.3 0 0 0-7.5 7.5L12 22l8.8-8.7a5.3 5.3 0 0 0 0-7.5Z" />
+    </svg>
+  );
+}
+
+function BookmarkIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M6 3.5h12v17l-6-4-6 4v-17ZM12 7v6M9 10h6" />
+    </svg>
+  );
+}
+
+function TrashIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M4 7h16M9 7V4h6v3m3 0-1 14H7L6 7m4 4v6m4-6v6" />
+    </svg>
+  );
+}
+
+function SiteNav({ favoritesCount, watchlistCount }) {
+  const navClass = ({ isActive }) =>
+    `site-nav-link ${isActive ? "is-active" : ""}`;
+
+  return (
+    <nav className="site-nav" aria-label="Main navigation">
+      <Link className="site-brand" to="/">
+        <span className="site-brand-icon">
+          <FilmIcon />
+        </span>
+        <span>CineMatch</span>
+      </Link>
+      <div className="site-nav-links">
+        <NavLink className={navClass} to="/" end>
+          Home
+        </NavLink>
+        <NavLink className={navClass} to="/favorites">
+          Favorites
+          {favoritesCount > 0 && <span>{favoritesCount}</span>}
+        </NavLink>
+        <NavLink className={navClass} to="/watchlist">
+          Watchlist
+          {watchlistCount > 0 && <span>{watchlistCount}</span>}
+        </NavLink>
+      </div>
+    </nav>
+  );
+}
+
+function MovieCard({ movie, collections, onRemove, removeLabel }) {
   const releaseYear = movie.release_date
     ? movie.release_date.slice(0, 4)
     : "Year unavailable";
@@ -90,16 +144,81 @@ function MovieCard({ movie }) {
     </>
   );
 
-  return movie.id ? (
-    <Link
-      className="movie-card movie-card-link"
-      to={`/movie/${movie.id}`}
-      aria-label={`View details for ${movie.title}`}
-    >
-      {content}
-    </Link>
-  ) : (
-    <article className="movie-card">{content}</article>
+  const canSave = movie.id != null;
+  const favoriteIsActive = canSave && collections.isFavorite(movie.id);
+  const watchlistIsActive = canSave && collections.isWatchlisted(movie.id);
+
+  return (
+    <article className="movie-card">
+      <div className="card-save-actions" aria-label="Save movie">
+        <button
+          className={`card-save-button favorite-button ${
+            favoriteIsActive ? "is-active" : ""
+          }`}
+          type="button"
+          aria-label={
+            favoriteIsActive ? "Remove from favorites" : "Add to favorites"
+          }
+          aria-pressed={favoriteIsActive}
+          title={
+            canSave
+              ? favoriteIsActive
+                ? "Remove from favorites"
+                : "Add to favorites"
+              : "Movie ID unavailable"
+          }
+          disabled={!canSave}
+          onClick={() => collections.toggleFavorite(movie)}
+        >
+          <HeartIcon />
+        </button>
+        <button
+          className={`card-save-button watchlist-button ${
+            watchlistIsActive ? "is-active" : ""
+          }`}
+          type="button"
+          aria-label={
+            watchlistIsActive
+              ? "Remove from watchlist"
+              : "Add to watchlist"
+          }
+          aria-pressed={watchlistIsActive}
+          title={
+            canSave
+              ? watchlistIsActive
+                ? "Remove from watchlist"
+                : "Add to watchlist"
+              : "Movie ID unavailable"
+          }
+          disabled={!canSave}
+          onClick={() => collections.toggleWatchlist(movie)}
+        >
+          <BookmarkIcon />
+        </button>
+      </div>
+
+      {movie.id ? (
+        <Link
+          className="movie-card-main movie-card-link"
+          to={`/movie/${movie.id}`}
+          aria-label={`View details for ${movie.title}`}
+        >
+          {content}
+        </Link>
+      ) : (
+        <div className="movie-card-main">{content}</div>
+      )}
+
+      {onRemove && (
+        <button
+          className="card-remove-button"
+          type="button"
+          onClick={() => onRemove(movie.id)}
+        >
+          <TrashIcon /> {removeLabel}
+        </button>
+      )}
+    </article>
   );
 }
 
@@ -117,7 +236,7 @@ function MovieCardSkeleton() {
   );
 }
 
-function Home() {
+function Home({ collections }) {
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedMovie, setSelectedMovie] = useState("");
   const [searchResponse, setSearchResponse] = useState({
@@ -352,6 +471,10 @@ function Home() {
       <div className="ambient ambient-two" />
 
       <section className="recommendation-panel">
+        <SiteNav
+          favoritesCount={collections.favorites.length}
+          watchlistCount={collections.watchlist.length}
+        />
         <header className="hero-copy">
           <div className="brand-mark" aria-hidden="true">
             <FilmIcon />
@@ -531,6 +654,7 @@ function Home() {
               {recommendations.map((movie, index) => (
                 <MovieCard
                   movie={movie}
+                  collections={collections}
                   key={`${movie.id || movie.title}-${index}`}
                 />
               ))}
@@ -573,7 +697,11 @@ function Home() {
           ) : trendingState.movies.length > 0 ? (
             <div className="movie-grid trending-grid">
               {trendingState.movies.map((movie, index) => (
-                <MovieCard movie={movie} key={`${movie.id}-${index}`} />
+                <MovieCard
+                  movie={movie}
+                  collections={collections}
+                  key={`${movie.id}-${index}`}
+                />
               ))}
             </div>
           ) : (
@@ -592,10 +720,103 @@ function Home() {
   );
 }
 
+function SavedMoviesPage({ collection, collections }) {
+  const isFavoritesPage = collection === "favorites";
+  const movies = isFavoritesPage
+    ? collections.favorites
+    : collections.watchlist;
+  const title = isFavoritesPage ? "Your Favorites" : "Your Watchlist";
+  const subtitle = isFavoritesPage
+    ? "The movies you loved, all in one place."
+    : "A hand-picked queue for your next movie night.";
+  const emptyTitle = isFavoritesPage
+    ? "No favorites yet"
+    : "Your watchlist is empty";
+  const emptyMessage = isFavoritesPage
+    ? "Tap the heart on any movie card to save it here."
+    : "Tap the bookmark on a movie card to build your watchlist.";
+  const removeMovie = isFavoritesPage
+    ? collections.removeFavorite
+    : collections.removeFromWatchlist;
+
+  return (
+    <main className="app-shell collection-shell">
+      <div className="ambient ambient-one" />
+      <div className="ambient ambient-two" />
+
+      <section className="recommendation-panel collection-panel">
+        <SiteNav
+          favoritesCount={collections.favorites.length}
+          watchlistCount={collections.watchlist.length}
+        />
+
+        <header className="collection-hero">
+          <p className="section-kicker">Your personal cinema</p>
+          <h1>{title}</h1>
+          <p>{subtitle}</p>
+          {movies.length > 0 && (
+            <span className="collection-count">
+              {movies.length} {movies.length === 1 ? "movie" : "movies"}
+            </span>
+          )}
+        </header>
+
+        {movies.length > 0 ? (
+          <div className="movie-grid collection-grid">
+            {movies.map((movie) => (
+              <MovieCard
+                movie={movie}
+                collections={collections}
+                onRemove={removeMovie}
+                removeLabel={
+                  isFavoritesPage
+                    ? "Remove from Favorites"
+                    : "Remove from Watchlist"
+                }
+                key={movie.id}
+              />
+            ))}
+          </div>
+        ) : (
+          <div className="collection-empty">
+            <div className="collection-empty-icon">
+              {isFavoritesPage ? <HeartIcon /> : <BookmarkIcon />}
+            </div>
+            <h2>{emptyTitle}</h2>
+            <p>{emptyMessage}</p>
+            <Link className="collection-home-button" to="/">
+              Discover movies
+            </Link>
+          </div>
+        )}
+      </section>
+
+      <footer>
+        <FilmIcon />
+        <span>Thoughtful picks, one movie at a time.</span>
+      </footer>
+    </main>
+  );
+}
+
 function App() {
+  const collections = useMovieCollections();
+
   return (
     <Routes>
-      <Route path="/" element={<Home />} />
+      <Route path="/" element={<Home collections={collections} />} />
+      <Route
+        path="/favorites"
+        element={
+          <SavedMoviesPage collection="favorites" collections={collections} />
+        }
+      />
+      <Route
+        path="/watchlist"
+        element={
+          <SavedMoviesPage collection="watchlist" collections={collections} />
+        }
+      />
       <Route path="/movie/:id" element={<MovieDetails />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

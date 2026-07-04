@@ -154,9 +154,17 @@ function MovieDetails() {
           <Link className="back-link" to="/">
             <ArrowLeftIcon /> Back to Home
           </Link>
-          <span className="details-brand">
-            <FilmIcon /> CineMatch
-          </span>
+          <div className="details-nav-right">
+            <Link className="details-nav-link" to="/favorites">
+              Favorites
+            </Link>
+            <Link className="details-nav-link" to="/watchlist">
+              Watchlist
+            </Link>
+            <span className="details-brand">
+              <FilmIcon /> CineMatch
+            </span>
+          </div>
         </nav>
 
         <div className="details-layout details-container">
