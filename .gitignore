@@ -1,0 +1,67 @@
+# ==========================
+# Python
+# ==========================
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# Virtual Environment
+venv/
+.venv/
+env/
+
+# Environment Variables
+.env
+backend/.env
+frontend/.env
+
+# Jupyter
+.ipynb_checkpoints/
+
+# VS Code
+.vscode/
+
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db
+
+# ==========================
+# Node.js
+# ==========================
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Build folders
+dist/
+build/
+
+# Vite
+.vite/
+
+# Coverage
+coverage/
+
+# Logs
+*.log
+
+# ==========================
+# IDE
+# ==========================
+.idea/
+
+# ==========================
+# Secrets
+# ==========================
+*.pem
+*.key
+*.crt
