@@ -22,6 +22,15 @@ function SparkleIcon() {
   );
 }
 
+function SearchIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <circle cx="11" cy="11" r="6.5" />
+      <path d="m16 16 4 4" />
+    </svg>
+  );
+}
+
 function MovieCard({ movie }) {
   const releaseYear = movie.release_date
     ? movie.release_date.slice(0, 4)
@@ -81,33 +90,120 @@ function MovieCard({ movie }) {
 }
 
 function Home() {
-  const [movies, setMovies] = useState([]);
+  const [searchTerm, setSearchTerm] = useState("");
   const [selectedMovie, setSelectedMovie] = useState("");
+  const [searchResponse, setSearchResponse] = useState({
+    query: "",
+    results: [],
+    error: false,
+  });
+  const [isSuggestionsOpen, setIsSuggestionsOpen] = useState(false);
+  const [activeSuggestion, setActiveSuggestion] = useState(-1);
   const [recommendations, setRecommendations] = useState([]);
-  const [isLoadingMovies, setIsLoadingMovies] = useState(true);
   const [isRecommending, setIsRecommending] = useState(false);
   const [error, setError] = useState("");
 
+  const searchQuery = searchTerm.trim();
+  const hasCurrentResponse = searchResponse.query === searchQuery;
+  const suggestions = hasCurrentResponse ? searchResponse.results : [];
+  const isSearching =
+    isSuggestionsOpen && Boolean(searchQuery) && !hasCurrentResponse;
+
   useEffect(() => {
-    axios
-      .get(`${API_URL}/movies`)
-      .then((res) => setMovies(res.data))
-      .catch(() => setError("We couldn't load the movie library. Please try again."))
-      .finally(() => setIsLoadingMovies(false));
-  }, []);
+    if (!isSuggestionsOpen || !searchQuery) return undefined;
+
+    const controller = new AbortController();
+    const debounceTimer = window.setTimeout(() => {
+      axios
+        .get(`${API_URL}/search`, {
+          params: { query: searchQuery },
+          signal: controller.signal,
+        })
+        .then((response) => {
+          setSearchResponse({
+            query: searchQuery,
+            results: response.data.results || [],
+            error: false,
+          });
+        })
+        .catch((requestError) => {
+          if (requestError.code !== "ERR_CANCELED") {
+            setSearchResponse({
+              query: searchQuery,
+              results: [],
+              error: true,
+            });
+          }
+        });
+    }, 300);
+
+    return () => {
+      window.clearTimeout(debounceTimer);
+      controller.abort();
+    };
+  }, [isSuggestionsOpen, searchQuery]);
+
+  const selectSuggestion = (movieTitle) => {
+    setSearchTerm(movieTitle);
+    setSelectedMovie(movieTitle);
+    setIsSuggestionsOpen(false);
+    setActiveSuggestion(-1);
+  };
+
+  const handleSearchChange = (event) => {
+    const value = event.target.value;
+    setSearchTerm(value);
+    setSelectedMovie(value);
+    setIsSuggestionsOpen(Boolean(value.trim()));
+    setActiveSuggestion(-1);
+  };
+
+  const handleSearchKeyDown = (event) => {
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setIsSuggestionsOpen(Boolean(searchQuery));
+      if (suggestions.length > 0) {
+        setActiveSuggestion((current) =>
+          Math.min(current + 1, suggestions.length - 1),
+        );
+      }
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      if (suggestions.length > 0) {
+        setActiveSuggestion((current) =>
+          current <= 0 ? suggestions.length - 1 : current - 1,
+        );
+      }
+    } else if (event.key === "Enter" && activeSuggestion >= 0) {
+      event.preventDefault();
+      selectSuggestion(suggestions[activeSuggestion]);
+    } else if (event.key === "Escape") {
+      setIsSuggestionsOpen(false);
+      setActiveSuggestion(-1);
+    }
+  };
 
   const getRecommendations = async (event) => {
     event.preventDefault();
 
-    if (!selectedMovie) return;
+    const movieTitle = selectedMovie.trim();
+    if (!movieTitle) return;
 
     setIsRecommending(true);
     setError("");
+    setIsSuggestionsOpen(false);
 
     try {
       const res = await axios.get(
-        `${API_URL}/recommend/${encodeURIComponent(selectedMovie)}`,
+        `${API_URL}/recommend/${encodeURIComponent(movieTitle)}`,
       );
+
+      if (res.data.error) {
+        setRecommendations([]);
+        setError(res.data.error);
+        return;
+      }
+
       setRecommendations(res.data.recommendations || []);
     } catch {
       setError("Something interrupted the search. Please give it another try.");
@@ -139,30 +235,93 @@ function Home() {
         </header>
 
         <form className="movie-search" onSubmit={getRecommendations}>
-          <label htmlFor="movie-select">Start with a movie</label>
+          <label htmlFor="movie-search-input">Start with a movie</label>
           <div className="search-controls">
-            <div className="select-wrap">
-              <FilmIcon />
-              <select
-                id="movie-select"
-                value={selectedMovie}
-                onChange={(event) => setSelectedMovie(event.target.value)}
-                disabled={isLoadingMovies}
-              >
-                <option value="">
-                  {isLoadingMovies ? "Loading movies…" : "Select a movie"}
-                </option>
-                {movies.map((movie) => (
-                  <option key={movie} value={movie}>
-                    {movie}
-                  </option>
-                ))}
-              </select>
+            <div
+              className="autocomplete"
+              onBlur={(event) => {
+                if (!event.currentTarget.contains(event.relatedTarget)) {
+                  setIsSuggestionsOpen(false);
+                  setActiveSuggestion(-1);
+                }
+              }}
+            >
+              <div className="search-input-wrap">
+                <SearchIcon />
+                <input
+                  id="movie-search-input"
+                  className="search-input"
+                  type="search"
+                  value={searchTerm}
+                  placeholder="Search for a movie…"
+                  autoComplete="off"
+                  role="combobox"
+                  aria-autocomplete="list"
+                  aria-expanded={isSuggestionsOpen}
+                  aria-controls="movie-suggestions"
+                  aria-activedescendant={
+                    activeSuggestion >= 0
+                      ? `movie-suggestion-${activeSuggestion}`
+                      : undefined
+                  }
+                  onChange={handleSearchChange}
+                  onFocus={() =>
+                    setIsSuggestionsOpen(Boolean(searchQuery))
+                  }
+                  onKeyDown={handleSearchKeyDown}
+                />
+                {isSearching && (
+                  <span className="search-spinner" aria-label="Searching" />
+                )}
+              </div>
+
+              {isSuggestionsOpen && searchQuery && (
+                <div
+                  className="suggestions-dropdown"
+                  id="movie-suggestions"
+                  role="listbox"
+                  aria-label="Movie suggestions"
+                >
+                  {isSearching ? (
+                    <div className="suggestion-message">
+                      <span className="search-spinner" aria-hidden="true" />
+                      Searching movies…
+                    </div>
+                  ) : searchResponse.error ? (
+                    <div className="suggestion-message suggestion-error">
+                      Search is unavailable. Please try again.
+                    </div>
+                  ) : suggestions.length > 0 ? (
+                    suggestions.map((movie, index) => (
+                      <button
+                        id={`movie-suggestion-${index}`}
+                        className={`suggestion-item ${
+                          activeSuggestion === index ? "is-active" : ""
+                        }`}
+                        type="button"
+                        role="option"
+                        aria-selected={activeSuggestion === index}
+                        key={movie}
+                        onMouseEnter={() => setActiveSuggestion(index)}
+                        onClick={() => selectSuggestion(movie)}
+                      >
+                        <span className="suggestion-icon">
+                          <FilmIcon />
+                        </span>
+                        <span>{movie}</span>
+                      </button>
+                    ))
+                  ) : (
+                    <div className="suggestion-message">No movies found</div>
+                  )}
+                </div>
+              )}
             </div>
 
             <button
+              className="recommend-button"
               type="submit"
-              disabled={!selectedMovie || isRecommending}
+              disabled={!selectedMovie.trim() || isRecommending}
             >
               {isRecommending ? (
                 <span className="spinner" aria-hidden="true" />

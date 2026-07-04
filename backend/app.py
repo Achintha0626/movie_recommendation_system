@@ -33,6 +33,7 @@ dataframe = pd.read_csv(BASE_DIR / "dumped_obj" / "movie_dataframe_for_app.csv")
 sig = joblib.load(BASE_DIR / "dumped_obj" / "sigmoid_kernel.pkl")
 
 indices = pd.Series(data.index, index=data["original_title"]).drop_duplicates()
+movie_titles = list(dict.fromkeys(data["original_title"].dropna().astype(str)))
 
 
 def _movie_fallback(title: str) -> dict:
@@ -195,7 +196,32 @@ def get_tmdb_movie_details(tmdb_id: int) -> dict:
 
 @app.get("/movies")
 def get_movies():
-    return data["original_title"].dropna().tolist()
+    return movie_titles
+
+
+@app.get("/search")
+def search_movies(query: str = ""):
+    normalized_query = query.strip().casefold()
+
+    if not normalized_query:
+        return {"results": []}
+
+    prefix_matches = []
+    partial_matches = []
+
+    for title in movie_titles:
+        normalized_title = title.casefold()
+
+        if normalized_title.startswith(normalized_query):
+            prefix_matches.append(title)
+        elif normalized_query in normalized_title:
+            partial_matches.append(title)
+
+        if len(prefix_matches) >= 10:
+            break
+
+    results = (prefix_matches + partial_matches)[:10]
+    return {"results": results}
 
 
 @app.get("/recommend/{movie_title}")

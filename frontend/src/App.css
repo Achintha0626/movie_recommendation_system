@@ -161,14 +161,20 @@ svg {
 .search-controls {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
   gap: 0.7rem;
 }
 
-.select-wrap {
+.autocomplete,
+.search-input-wrap {
   position: relative;
 }
 
-.select-wrap > svg {
+.autocomplete {
+  min-width: 0;
+}
+
+.search-input-wrap > svg {
   position: absolute;
   top: 50%;
   left: 1rem;
@@ -179,14 +185,14 @@ svg {
   pointer-events: none;
 }
 
-select,
-button {
+.search-input,
+.recommend-button {
   min-height: 56px;
   border-radius: 14px;
   font: inherit;
 }
 
-select {
+.search-input {
   width: 100%;
   padding: 0 3rem 0 3rem;
   border: 1px solid rgba(255, 255, 255, 0.1);
@@ -194,26 +200,124 @@ select {
   color: #e9e4f0;
   background-color: rgba(6, 5, 12, 0.72);
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.035);
-  cursor: pointer;
   transition: border-color 180ms ease, box-shadow 180ms ease, background-color 180ms ease;
 }
 
-select:hover {
+.search-input::placeholder {
+  color: #756c81;
+}
+
+.search-input::-webkit-search-cancel-button {
+  filter: invert(1);
+  opacity: 0.55;
+}
+
+.search-input:hover {
   border-color: rgba(192, 132, 252, 0.4);
   background-color: rgba(10, 7, 18, 0.85);
 }
 
-select:focus-visible {
+.search-input:focus-visible {
   border-color: #a855f7;
   box-shadow: 0 0 0 4px rgba(168, 85, 247, 0.14);
 }
 
-select option {
-  color: #eee8f7;
-  background: #15101f;
+.search-input-wrap > .search-spinner {
+  position: absolute;
+  top: 50%;
+  right: 1.05rem;
+  transform: translateY(-50%);
 }
 
-button {
+.search-spinner {
+  display: block;
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255, 255, 255, 0.15);
+  border-top-color: #c084fc;
+  border-radius: 50%;
+  animation: spin 650ms linear infinite;
+}
+
+.suggestions-dropdown {
+  position: absolute;
+  top: calc(100% + 0.55rem);
+  right: 0;
+  left: 0;
+  z-index: 20;
+  overflow: hidden auto;
+  max-height: 330px;
+  padding: 0.45rem;
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  border-radius: 15px;
+  background: rgba(16, 12, 25, 0.97);
+  box-shadow: 0 22px 50px rgba(0, 0, 0, 0.46);
+  backdrop-filter: blur(22px);
+  animation: suggestions-in 160ms ease both;
+}
+
+.suggestion-item {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  width: 100%;
+  min-height: 46px;
+  padding: 0.55rem 0.7rem;
+  border: 0;
+  border-radius: 10px;
+  outline: none;
+  color: #cfc7d8;
+  background: transparent;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 620;
+  text-align: left;
+  cursor: pointer;
+  transition: color 140ms ease, background 140ms ease, transform 140ms ease;
+}
+
+.suggestion-item:hover,
+.suggestion-item.is-active,
+.suggestion-item:focus-visible {
+  color: #f5effb;
+  background: linear-gradient(90deg, rgba(147, 51, 234, 0.2), rgba(147, 51, 234, 0.06));
+  transform: translateX(2px);
+}
+
+.suggestion-icon {
+  display: grid;
+  flex: 0 0 auto;
+  width: 30px;
+  height: 30px;
+  border: 1px solid rgba(192, 132, 252, 0.14);
+  border-radius: 9px;
+  color: #b78bd5;
+  background: rgba(147, 51, 234, 0.1);
+  place-items: center;
+}
+
+.suggestion-icon svg {
+  width: 16px;
+}
+
+.suggestion-message {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.65rem;
+  min-height: 60px;
+  padding: 0.75rem;
+  color: #8f879a;
+  font-size: 0.8rem;
+  text-align: center;
+}
+
+.suggestion-error {
+  color: #f0a9b5;
+}
+
+.recommend-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -229,27 +333,26 @@ button {
   transition: transform 180ms ease, box-shadow 180ms ease, filter 180ms ease;
 }
 
-button svg {
+.recommend-button svg {
   width: 20px;
 }
 
-button:hover:not(:disabled) {
+.recommend-button:hover:not(:disabled) {
   transform: translateY(-2px);
   filter: brightness(1.1);
   box-shadow: 0 16px 35px rgba(124, 58, 237, 0.38);
 }
 
-button:active:not(:disabled) {
+.recommend-button:active:not(:disabled) {
   transform: translateY(0);
 }
 
-button:focus-visible {
+.recommend-button:focus-visible {
   outline: 3px solid rgba(216, 180, 254, 0.65);
   outline-offset: 3px;
 }
 
-button:disabled,
-select:disabled {
+.recommend-button:disabled {
   cursor: not-allowed;
   opacity: 0.55;
 }
@@ -533,6 +636,11 @@ footer svg {
   to { opacity: 1; transform: translateY(0); }
 }
 
+@keyframes suggestions-in {
+  from { opacity: 0; transform: translateY(-5px) scale(0.99); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
 @media (max-width: 640px) {
   .app-shell {
     padding: 0.75rem 0.75rem 1.25rem;
@@ -558,7 +666,7 @@ footer svg {
     grid-template-columns: 1fr;
   }
 
-  button {
+  .recommend-button {
     width: 100%;
   }
 
