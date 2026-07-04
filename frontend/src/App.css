@@ -328,6 +328,17 @@ select:disabled {
   animation: card-in 450ms both;
 }
 
+.movie-card-link {
+  color: inherit;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.movie-card-link:focus-visible {
+  outline: 3px solid rgba(192, 132, 252, 0.75);
+  outline-offset: 4px;
+}
+
 .movie-card:nth-child(2) { animation-delay: 60ms; }
 .movie-card:nth-child(3) { animation-delay: 120ms; }
 .movie-card:nth-child(4) { animation-delay: 180ms; }
@@ -446,6 +457,21 @@ select:disabled {
   line-height: 1.55;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 4;
+}
+
+.card-action {
+  margin-top: auto;
+  padding-top: 0.9rem;
+  color: #b99bdd;
+  font-size: 0.69rem;
+  font-weight: 750;
+  letter-spacing: 0.04em;
+  transition: color 180ms ease, transform 180ms ease;
+}
+
+.movie-card-link:hover .card-action {
+  color: #e0c7ff;
+  transform: translateX(3px);
 }
 
 .empty-state {

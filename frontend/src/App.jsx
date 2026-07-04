@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import axios from "axios";
+import { Link, Navigate, Route, Routes } from "react-router-dom";
+import MovieDetails from "./MovieDetails";
 import "./App.css";
 
 const API_URL = "http://127.0.0.1:8000";
@@ -20,7 +22,65 @@ function SparkleIcon() {
   );
 }
 
-function App() {
+function MovieCard({ movie }) {
+  const releaseYear = movie.release_date
+    ? movie.release_date.slice(0, 4)
+    : "Year unavailable";
+  const rating =
+    typeof movie.vote_average === "number"
+      ? movie.vote_average.toFixed(1)
+      : "NR";
+
+  const content = (
+    <>
+      <div className="poster-art">
+        {movie.poster_url ? (
+          <img
+            src={movie.poster_url}
+            alt={`${movie.title} poster`}
+            loading="lazy"
+          />
+        ) : (
+          <div
+            className="no-poster"
+            role="img"
+            aria-label="No poster available"
+          >
+            <FilmIcon />
+            <span>No Poster</span>
+          </div>
+        )}
+      </div>
+      <div className="movie-details">
+        <h3 title={movie.title}>{movie.title}</h3>
+        <div className="movie-meta">
+          <span>{releaseYear}</span>
+          <span aria-label={`TMDB rating ${rating} out of 10`}>
+            <b aria-hidden="true">★</b> {rating}
+          </span>
+        </div>
+        {movie.overview && <p className="movie-overview">{movie.overview}</p>}
+        <span className="card-action">
+          {movie.id ? "View details →" : "Details unavailable"}
+        </span>
+      </div>
+    </>
+  );
+
+  return movie.id ? (
+    <Link
+      className="movie-card movie-card-link"
+      to={`/movie/${movie.id}`}
+      aria-label={`View details for ${movie.title}`}
+    >
+      {content}
+    </Link>
+  ) : (
+    <article className="movie-card">{content}</article>
+  );
+}
+
+function Home() {
   const [movies, setMovies] = useState([]);
   const [selectedMovie, setSelectedMovie] = useState("");
   const [recommendations, setRecommendations] = useState([]);
@@ -135,53 +195,12 @@ function App() {
 
           {recommendations.length > 0 ? (
             <div className="movie-grid">
-              {recommendations.map((movie, index) => {
-                const releaseYear = movie.release_date
-                  ? movie.release_date.slice(0, 4)
-                  : "Year unavailable";
-                const rating =
-                  typeof movie.vote_average === "number"
-                    ? movie.vote_average.toFixed(1)
-                    : "NR";
-
-                return (
-                  <article
-                    className="movie-card"
-                    key={`${movie.title}-${index}`}
-                  >
-                    <div className="poster-art">
-                      {movie.poster_url ? (
-                        <img
-                          src={movie.poster_url}
-                          alt={`${movie.title} poster`}
-                          loading="lazy"
-                        />
-                      ) : (
-                        <div
-                          className="no-poster"
-                          role="img"
-                          aria-label="No poster available"
-                        >
-                          <FilmIcon />
-                          <span>No Poster</span>
-                        </div>
-                      )}
-                    </div>
-                    <div className="movie-details">
-                      <h3 title={movie.title}>{movie.title}</h3>
-                      <div className="movie-meta">
-                        <span>{releaseYear}</span>
-                        <span aria-label={`TMDB rating ${rating} out of 10`}>
-                          <b aria-hidden="true">★</b> {rating}
-                        </span>
-                      </div>
-                      {movie.overview && (
-                        <p className="movie-overview">{movie.overview}</p>
-                      )}
-                    </div>
-                  </article>
-                );
-              })}
+              {recommendations.map((movie, index) => (
+                <MovieCard
+                  movie={movie}
+                  key={`${movie.id || movie.title}-${index}`}
+                />
+              ))}
             </div>
           ) : (
             <div className="empty-state">
@@ -202,6 +221,16 @@ function App() {
         <span>Thoughtful picks, one movie at a time.</span>
       </footer>
     </main>
+  );
+}
+
+function App() {
+  return (
+    <Routes>
+      <Route path="/" element={<Home />} />
+      <Route path="/movie/:id" element={<MovieDetails />} />
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
   );
 }
 
