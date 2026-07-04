@@ -99,7 +99,13 @@ function SiteNav({ favoritesCount, watchlistCount }) {
   );
 }
 
-function MovieCard({ movie, collections, onRemove, removeLabel }) {
+function MovieCard({
+  movie,
+  collections,
+  onRemove,
+  removeLabel,
+  showRecommendationInfo = false,
+}) {
   const releaseYear = movie.release_date
     ? movie.release_date.slice(0, 4)
     : "Year unavailable";
@@ -107,6 +113,13 @@ function MovieCard({ movie, collections, onRemove, removeLabel }) {
     typeof movie.vote_average === "number"
       ? movie.vote_average.toFixed(1)
       : "NR";
+  const matchScore =
+    typeof movie.match_score === "number"
+      ? Math.max(0, Math.min(100, Math.round(movie.match_score)))
+      : 0;
+  const reasons = Array.isArray(movie.reasons)
+    ? movie.reasons.filter((reason) => typeof reason === "string" && reason)
+    : [];
 
   const content = (
     <>
@@ -137,6 +150,24 @@ function MovieCard({ movie, collections, onRemove, removeLabel }) {
           </span>
         </div>
         {movie.overview && <p className="movie-overview">{movie.overview}</p>}
+        {showRecommendationInfo && (
+          <div className="recommendation-explanation">
+            <div className="match-heading">
+              <span className="match-score-badge">{matchScore}% Match</span>
+              <span>Why this pick</span>
+            </div>
+            <div className="reason-chips" aria-label="Recommendation reasons">
+              {(reasons.length > 0
+                ? reasons
+                : ["Similar story overview"]
+              ).map((reason) => (
+                <span className="reason-chip" key={reason}>
+                  {reason}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
         <span className="card-action">
           {movie.id ? "View details →" : "Details unavailable"}
         </span>
@@ -655,6 +686,7 @@ function Home({ collections }) {
                 <MovieCard
                   movie={movie}
                   collections={collections}
+                  showRecommendationInfo
                   key={`${movie.id || movie.title}-${index}`}
                 />
               ))}

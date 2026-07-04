@@ -1,5 +1,6 @@
-import os
 import json
+import math
+import os
 from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
 from pathlib import Path
@@ -79,6 +80,59 @@ def _parse_genres(raw_genres) -> tuple[str, ...]:
 
 
 movie_genres = dataframe["genres"].apply(_parse_genres)
+movie_genre_keys = movie_genres.apply(
+    lambda genres: frozenset(genre.casefold() for genre in genres)
+)
+
+
+def _parse_names(raw_items) -> frozenset[str]:
+    """Extract normalized names from serialized keywords or cast data."""
+    if raw_items is None or (isinstance(raw_items, float) and pd.isna(raw_items)):
+        return frozenset()
+
+    try:
+        items = json.loads(raw_items) if isinstance(raw_items, str) else raw_items
+    except (json.JSONDecodeError, TypeError):
+        return frozenset()
+
+    if not isinstance(items, list):
+        return frozenset()
+
+    return frozenset(
+        name.strip().casefold()
+        for item in items
+        if isinstance(item, dict)
+        and isinstance((name := item.get("name")), str)
+        and name.strip()
+    )
+
+
+def _parse_directors(raw_crew) -> frozenset[str]:
+    """Extract normalized director names from serialized crew data."""
+    if raw_crew is None or (isinstance(raw_crew, float) and pd.isna(raw_crew)):
+        return frozenset()
+
+    try:
+        crew = json.loads(raw_crew) if isinstance(raw_crew, str) else raw_crew
+    except (json.JSONDecodeError, TypeError):
+        return frozenset()
+
+    if not isinstance(crew, list):
+        return frozenset()
+
+    return frozenset(
+        member["name"].strip().casefold()
+        for member in crew
+        if isinstance(member, dict)
+        and member.get("job") == "Director"
+        and isinstance(member.get("name"), str)
+        and member["name"].strip()
+    )
+
+
+movie_keywords = dataframe["keywords"].apply(_parse_names)
+movie_cast = dataframe["cast"].apply(_parse_names)
+movie_directors = dataframe["crew"].apply(_parse_directors)
 dataset_genres = {genre for genres in movie_genres for genre in genres}
 
 if dataset_genres:
@@ -91,6 +145,43 @@ if dataset_genres:
     available_genres = ["All", *preferred_genres, *additional_genres]
 else:
     available_genres = DEFAULT_GENRES
+
+
+def _match_percentage(similarity_score) -> int:
+    try:
+        score = float(similarity_score)
+    except (TypeError, ValueError):
+        score = 0.0
+
+    if not math.isfinite(score):
+        score = 0.0
+
+    return int(round(max(0.0, min(1.0, score)) * 100))
+
+
+def _recommendation_reasons(
+    selected_index: int,
+    recommended_index: int,
+    similarity_score,
+) -> list[str]:
+    reasons = []
+
+    if _match_percentage(similarity_score) >= 70:
+        reasons.append("Similar story overview")
+
+    if movie_genre_keys.iloc[selected_index] & movie_genre_keys.iloc[recommended_index]:
+        reasons.append("Similar genre")
+
+    if movie_keywords.iloc[selected_index] & movie_keywords.iloc[recommended_index]:
+        reasons.append("Similar keywords")
+
+    if movie_cast.iloc[selected_index] & movie_cast.iloc[recommended_index]:
+        reasons.append("Shared cast")
+
+    if movie_directors.iloc[selected_index] & movie_directors.iloc[recommended_index]:
+        reasons.append("Same director")
+
+    return reasons or ["Similar story overview"]
 
 
 def _movie_fallback(title: str) -> dict:
@@ -339,10 +430,11 @@ def recommend(movie_title: str, genre: str | None = None):
     if movie_title not in indices:
         return {"error": "Movie not found"}
 
-    idx = indices[movie_title]
-    scores = list(enumerate(sig[idx]))
-    scores = sorted(scores, key=lambda x: x[1], reverse=True)[1:11]
-    movie_indices = [i[0] for i in scores]
+    idx = int(indices[movie_title])
+    ranked_scores = list(enumerate(sig[idx]))
+    ranked_scores = sorted(
+        ranked_scores, key=lambda item: item[1], reverse=True
+    )[1:11]
 
     requested_genre = (genre or "All").strip()
     normalized_genre = requested_genre.casefold()
@@ -360,22 +452,38 @@ def recommend(movie_title: str, genre: str | None = None):
                 detail=f"Unknown genre: {requested_genre}",
             )
 
-        movie_indices = [
-            movie_index
-            for movie_index in movie_indices
+        ranked_scores = [
+            (movie_index, similarity_score)
+            for movie_index, similarity_score in ranked_scores
             if any(
                 movie_genre.casefold() == canonical_genre.casefold()
                 for movie_genre in movie_genres.iloc[movie_index]
             )
         ]
 
-    recommendation_titles = (
-        dataframe["original_title"].iloc[movie_indices].dropna().tolist()
-    )
+    candidates = [
+        (movie_index, similarity_score, dataframe["original_title"].iloc[movie_index])
+        for movie_index, similarity_score in ranked_scores
+        if pd.notna(dataframe["original_title"].iloc[movie_index])
+    ]
+    recommendation_titles = [candidate[2] for candidate in candidates]
 
     # The ranking logic above remains local; only metadata lookup is parallelized.
     with ThreadPoolExecutor(max_workers=5) as executor:
-        recommendations = list(executor.map(search_tmdb_movie, recommendation_titles))
+        enriched_movies = list(executor.map(search_tmdb_movie, recommendation_titles))
+
+    recommendations = [
+        {
+            **movie,
+            "match_score": _match_percentage(similarity_score),
+            "reasons": _recommendation_reasons(
+                idx, movie_index, similarity_score
+            ),
+        }
+        for movie, (movie_index, similarity_score, _) in zip(
+            enriched_movies, candidates
+        )
+    ]
 
     return {"movie": movie_title, "recommendations": recommendations}
 
