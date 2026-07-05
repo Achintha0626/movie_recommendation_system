@@ -44,6 +44,81 @@ function formatRuntime(runtime) {
   return hours ? `${hours}h ${minutes}m` : `${minutes}m`;
 }
 
+function MovieDetailsSkeleton() {
+  return (
+    <main
+      className="details-page details-skeleton-page"
+      aria-busy="true"
+      aria-label="Loading movie details"
+    >
+      <section className="details-hero details-hero-skeleton">
+        <div className="details-backdrop-shade" />
+
+        <nav className="details-nav details-container" aria-label="Movie navigation">
+          <Link className="back-link" to="/">
+            <ArrowLeftIcon /> Back to Home
+          </Link>
+          <div className="details-nav-right">
+            <span className="details-nav-skeleton skeleton-shimmer" />
+            <span className="details-nav-skeleton skeleton-shimmer" />
+            <Link className="details-brand" to="/">
+              <FilmIcon /> CineMatch
+            </Link>
+          </div>
+        </nav>
+
+        <div className="details-layout details-container">
+          <div className="details-poster details-skeleton-poster skeleton-shimmer" />
+
+          <div className="details-copy details-skeleton-copy">
+            <span className="details-skeleton-kicker skeleton-shimmer" />
+            <span className="details-skeleton-title skeleton-shimmer" />
+            <span className="details-skeleton-title short skeleton-shimmer" />
+
+            <div className="details-facts">
+              <span className="details-skeleton-pill skeleton-shimmer" />
+              <span className="details-skeleton-pill skeleton-shimmer" />
+              <span className="details-skeleton-pill skeleton-shimmer" />
+            </div>
+
+            <div className="genre-list">
+              <span className="details-skeleton-chip skeleton-shimmer" />
+              <span className="details-skeleton-chip skeleton-shimmer" />
+              <span className="details-skeleton-chip skeleton-shimmer" />
+            </div>
+
+            <span className="details-skeleton-copy-line skeleton-shimmer" />
+            <span className="details-skeleton-copy-line skeleton-shimmer" />
+            <span className="details-skeleton-copy-line short skeleton-shimmer" />
+          </div>
+        </div>
+      </section>
+
+      <section className="cast-section details-container">
+        <div className="cast-heading">
+          <div>
+            <span className="details-skeleton-kicker skeleton-shimmer" />
+            <span className="cast-title-skeleton skeleton-shimmer" />
+          </div>
+          <span className="cast-count-skeleton skeleton-shimmer" />
+        </div>
+
+        <div className="cast-grid" aria-hidden="true">
+          {Array.from({ length: 6 }, (_, index) => (
+            <article className="cast-card cast-card-skeleton" key={index}>
+              <div className="cast-photo skeleton-shimmer" />
+              <div className="cast-copy">
+                <span className="cast-line-skeleton skeleton-shimmer" />
+                <span className="cast-line-skeleton short skeleton-shimmer" />
+              </div>
+            </article>
+          ))}
+        </div>
+      </section>
+    </main>
+  );
+}
+
 function MovieDetails({ onMovieViewed }) {
   const { id } = useParams();
   const hasValidId = /^\d+$/.test(id || "");
@@ -120,15 +195,7 @@ function MovieDetails({ onMovieViewed }) {
   }
 
   if (isLoading) {
-    return (
-      <main className="details-state-page">
-        <div className="details-loader" role="status">
-          <span className="details-spinner" aria-hidden="true" />
-          <h1>Setting the scene…</h1>
-          <p>Loading movie details</p>
-        </div>
-      </main>
-    );
+    return <MovieDetailsSkeleton />;
   }
 
   const releaseYear = movie.release_date?.slice(0, 4) || "Year unavailable";
@@ -164,9 +231,9 @@ function MovieDetails({ onMovieViewed }) {
             <Link className="details-nav-link" to="/dashboard">
               Dashboard
             </Link>
-            <span className="details-brand">
+            <Link className="details-brand" to="/">
               <FilmIcon /> CineMatch
-            </span>
+            </Link>
           </div>
         </nav>
 

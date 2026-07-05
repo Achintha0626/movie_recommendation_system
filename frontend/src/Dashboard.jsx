@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import "./Dashboard.css";
 
@@ -116,7 +117,67 @@ function getGenreCounts(history) {
     .slice(0, 5);
 }
 
+function DashboardSkeleton({ navigation }) {
+  return (
+    <main className="app-shell dashboard-shell">
+      <div className="ambient ambient-one" />
+      <div className="ambient ambient-two" />
+
+      <section className="recommendation-panel dashboard-panel">
+        {navigation}
+
+        <header className="dashboard-hero dashboard-hero-skeleton">
+          <span className="dashboard-kicker-skeleton skeleton-shimmer" />
+          <span className="dashboard-title-skeleton skeleton-shimmer" />
+          <span className="dashboard-copy-skeleton skeleton-shimmer" />
+        </header>
+
+        <section className="dashboard-summary" aria-hidden="true">
+          {Array.from({ length: 4 }, (_, index) => (
+            <article className="summary-card summary-card-skeleton" key={index}>
+              <span className="summary-icon skeleton-shimmer" />
+              <span className="summary-number-skeleton skeleton-shimmer" />
+              <span className="summary-label-skeleton skeleton-shimmer" />
+              <span className="summary-action-skeleton skeleton-shimmer" />
+            </article>
+          ))}
+        </section>
+
+        <div className="dashboard-columns" aria-hidden="true">
+          <section className="dashboard-section">
+            <span className="dashboard-section-title-skeleton skeleton-shimmer" />
+            <div className="dashboard-movie-list">
+              {Array.from({ length: 5 }, (_, index) => (
+                <span className="dashboard-row-skeleton skeleton-shimmer" key={index} />
+              ))}
+            </div>
+          </section>
+          <section className="dashboard-section">
+            <span className="dashboard-section-title-skeleton skeleton-shimmer" />
+            <div className="dashboard-movie-list">
+              {Array.from({ length: 5 }, (_, index) => (
+                <span className="dashboard-row-skeleton skeleton-shimmer" key={index} />
+              ))}
+            </div>
+          </section>
+        </div>
+      </section>
+    </main>
+  );
+}
+
 function Dashboard({ activity, collections, navigation }) {
+  const [isReady, setIsReady] = useState(false);
+
+  useEffect(() => {
+    const frame = window.requestAnimationFrame(() => setIsReady(true));
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
+
+  if (!isReady) {
+    return <DashboardSkeleton navigation={navigation} />;
+  }
+
   const topRecommended = getTopRecommended(activity.recommendationHistory);
   const mostSearched = getSearchCounts(activity.recommendationHistory);
   const favoriteGenres = getGenreCounts(activity.recommendationHistory);

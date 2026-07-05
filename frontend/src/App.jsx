@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import axios from "axios";
-import { Link, Navigate, NavLink, Route, Routes } from "react-router-dom";
+import { Link, NavLink, Route, Routes } from "react-router-dom";
 import Dashboard from "./Dashboard";
 import MovieDetails from "./MovieDetails";
+import NotFound from "./NotFound";
 import { API_BASE_URL } from "./config";
 import useMovieActivity from "./useMovieActivity";
 import useMovieCollections from "./useMovieCollections";
@@ -22,6 +23,11 @@ const DEFAULT_GENRES = [
   "Sci-Fi",
   "Thriller",
 ];
+
+const INITIAL_VISIBLE_MOVIE_CARDS = 6;
+const MOVIE_LOAD_STEP = 6;
+const INITIAL_VISIBLE_HISTORY_ITEMS = 4;
+const HISTORY_LOAD_STEP = 4;
 
 function FilmIcon() {
   return (
@@ -272,6 +278,39 @@ function MovieCardSkeleton() {
   );
 }
 
+function MovieGridSkeleton({ count = INITIAL_VISIBLE_MOVIE_CARDS }) {
+  return (
+    <div className="movie-grid skeleton-grid" aria-hidden="true">
+      {Array.from({ length: count }, (_, index) => (
+        <MovieCardSkeleton key={index} />
+      ))}
+    </div>
+  );
+}
+
+function LoadMoreButton({
+  visibleCount,
+  totalCount,
+  onLoadMore,
+  step = MOVIE_LOAD_STEP,
+  label = "Load More",
+}) {
+  const remaining = totalCount - visibleCount;
+
+  if (remaining <= 0) return null;
+
+  return (
+    <div className="load-more-wrap">
+      <button className="load-more-button" type="button" onClick={onLoadMore}>
+        {label}
+        <span>
+          Show {Math.min(step, remaining)} of {remaining} more
+        </span>
+      </button>
+    </div>
+  );
+}
+
 function formatRelativeTime(timestamp) {
   const elapsed = Math.max(0, Date.now() - Number(timestamp || 0));
   const minutes = Math.floor(elapsed / 60000);
@@ -304,12 +343,26 @@ function Home({ activity, collections }) {
     status: "loading",
     movies: [],
   });
+  const [visibleTrendingCount, setVisibleTrendingCount] = useState(
+    INITIAL_VISIBLE_MOVIE_CARDS,
+  );
   const [genreState, setGenreState] = useState({
     status: "loading",
     genres: DEFAULT_GENRES,
   });
   const [selectedGenre, setSelectedGenre] = useState("All");
   const [recommendations, setRecommendations] = useState([]);
+  const [visibleRecommendationCount, setVisibleRecommendationCount] = useState(
+    INITIAL_VISIBLE_MOVIE_CARDS,
+  );
+  const [recentPagination, setRecentPagination] = useState({
+    key: "",
+    count: INITIAL_VISIBLE_MOVIE_CARDS,
+  });
+  const [historyPagination, setHistoryPagination] = useState({
+    key: "",
+    count: INITIAL_VISIBLE_HISTORY_ITEMS,
+  });
   const [recommendationContext, setRecommendationContext] = useState({
     movieTitle: "",
     genre: "All",
@@ -335,6 +388,7 @@ function Home({ activity, collections }) {
           status: "success",
           movies: response.data.results || [],
         });
+        setVisibleTrendingCount(INITIAL_VISIBLE_MOVIE_CARDS);
       })
       .catch((requestError) => {
         if (requestError.code !== "ERR_CANCELED") {
@@ -469,6 +523,7 @@ function Home({ activity, collections }) {
 
     setSelectedGenre(genre);
     setRecommendations([]);
+    setVisibleRecommendationCount(INITIAL_VISIBLE_MOVIE_CARDS);
     setError("");
   };
 
@@ -483,6 +538,7 @@ function Home({ activity, collections }) {
     setError("");
     setIsSuggestionsOpen(false);
     setActiveSuggestion(-1);
+    setVisibleRecommendationCount(INITIAL_VISIBLE_MOVIE_CARDS);
     shouldScrollToRecommendations.current = true;
     setRecommendations([...item.recommendations]);
   };
@@ -496,6 +552,9 @@ function Home({ activity, collections }) {
     setIsRecommending(true);
     setError("");
     setIsSuggestionsOpen(false);
+    setRecommendationContext({ movieTitle, genre: selectedGenre });
+    setVisibleRecommendationCount(INITIAL_VISIBLE_MOVIE_CARDS);
+    setRecommendations([]);
 
     try {
       const res = await axios.get(
@@ -538,6 +597,37 @@ function Home({ activity, collections }) {
       setIsRecommending(false);
     }
   };
+
+  const visibleRecommendations = recommendations.slice(
+    0,
+    visibleRecommendationCount,
+  );
+  const visibleTrendingMovies = trendingState.movies.slice(
+    0,
+    visibleTrendingCount,
+  );
+  const recentlyViewedKey = activity.recentlyViewed
+    .map((movie) => movie.id)
+    .join("|");
+  const visibleRecentCount =
+    recentPagination.key === recentlyViewedKey
+      ? recentPagination.count
+      : INITIAL_VISIBLE_MOVIE_CARDS;
+  const visibleRecentlyViewed = activity.recentlyViewed.slice(
+    0,
+    visibleRecentCount,
+  );
+  const historyItemsKey = activity.recommendationHistory
+    .map((item) => `${item.searchedMovie}:${item.selectedGenre}:${item.createdAt}`)
+    .join("|");
+  const visibleHistoryCount =
+    historyPagination.key === historyItemsKey
+      ? historyPagination.count
+      : INITIAL_VISIBLE_HISTORY_ITEMS;
+  const visibleHistoryItems = activity.recommendationHistory.slice(
+    0,
+    visibleHistoryCount,
+  );
 
   return (
     <main className="app-shell">
@@ -697,7 +787,33 @@ function Home({ activity, collections }) {
           </p>
         )}
 
-        {recommendations.length > 0 && (
+        {isRecommending && (
+          <section
+            className="results recommendations-section"
+            aria-live="polite"
+            aria-busy="true"
+          >
+            <div className="results-heading">
+              <div>
+                <p className="section-kicker">Tuning the projector</p>
+                <h2>
+                  Finding matches for{" "}
+                  <span className="recommendation-title">
+                    {recommendationContext.movieTitle}
+                  </span>
+                </h2>
+                <p className="section-subtitle">
+                  We are comparing similarity, genre, keywords, and TMDB data.
+                </p>
+              </div>
+              <span className="result-count">Loading</span>
+            </div>
+
+            <MovieGridSkeleton />
+          </section>
+        )}
+
+        {!isRecommending && recommendations.length > 0 && (
           <section
             className="results recommendations-section"
             ref={recommendationsRef}
@@ -725,7 +841,7 @@ function Home({ activity, collections }) {
             </div>
 
             <div className="movie-grid">
-              {recommendations.map((movie, index) => (
+              {visibleRecommendations.map((movie, index) => (
                 <MovieCard
                   movie={movie}
                   collections={collections}
@@ -734,6 +850,16 @@ function Home({ activity, collections }) {
                 />
               ))}
             </div>
+
+            <LoadMoreButton
+              visibleCount={visibleRecommendationCount}
+              totalCount={recommendations.length}
+              onLoadMore={() =>
+                setVisibleRecommendationCount((count) =>
+                  Math.min(count + MOVIE_LOAD_STEP, recommendations.length),
+                )
+              }
+            />
           </section>
         )}
 
@@ -754,11 +880,7 @@ function Home({ activity, collections }) {
           </div>
 
           {trendingState.status === "loading" ? (
-            <div className="movie-grid trending-grid">
-              {Array.from({ length: 8 }, (_, index) => (
-                <MovieCardSkeleton key={index} />
-              ))}
-            </div>
+            <MovieGridSkeleton count={INITIAL_VISIBLE_MOVIE_CARDS} />
           ) : trendingState.status === "error" ? (
             <div className="trending-error" role="alert">
               <div className="trending-error-icon">
@@ -770,15 +892,30 @@ function Home({ activity, collections }) {
               </div>
             </div>
           ) : trendingState.movies.length > 0 ? (
-            <div className="movie-grid trending-grid">
-              {trendingState.movies.map((movie, index) => (
-                <MovieCard
-                  movie={movie}
-                  collections={collections}
-                  key={`${movie.id}-${index}`}
-                />
-              ))}
-            </div>
+            <>
+              <div className="movie-grid trending-grid">
+                {visibleTrendingMovies.map((movie, index) => (
+                  <MovieCard
+                    movie={movie}
+                    collections={collections}
+                    key={`${movie.id}-${index}`}
+                  />
+                ))}
+              </div>
+
+              <LoadMoreButton
+                visibleCount={visibleTrendingCount}
+                totalCount={trendingState.movies.length}
+                onLoadMore={() =>
+                  setVisibleTrendingCount((count) =>
+                    Math.min(
+                      count + MOVIE_LOAD_STEP,
+                      trendingState.movies.length,
+                    ),
+                  )
+                }
+              />
+            </>
           ) : (
             <div className="trending-error">
               No trending movies are available right now.
@@ -799,7 +936,7 @@ function Home({ activity, collections }) {
             </div>
 
             <div className="movie-grid recently-viewed-grid">
-              {activity.recentlyViewed.map((movie) => (
+              {visibleRecentlyViewed.map((movie) => (
                 <MovieCard
                   movie={movie}
                   collections={collections}
@@ -807,6 +944,20 @@ function Home({ activity, collections }) {
                 />
               ))}
             </div>
+
+            <LoadMoreButton
+              visibleCount={visibleRecentCount}
+              totalCount={activity.recentlyViewed.length}
+              onLoadMore={() =>
+                setRecentPagination({
+                  key: recentlyViewedKey,
+                  count: Math.min(
+                    visibleRecentCount + MOVIE_LOAD_STEP,
+                    activity.recentlyViewed.length,
+                  ),
+                })
+              }
+            />
           </section>
         )}
 
@@ -829,7 +980,7 @@ function Home({ activity, collections }) {
 
           {activity.recommendationHistory.length > 0 ? (
             <div className="history-grid">
-              {activity.recommendationHistory.map((item) => (
+              {visibleHistoryItems.map((item) => (
                 <article
                   className="history-card"
                   key={`${item.searchedMovie}-${item.selectedGenre}`}
@@ -887,6 +1038,22 @@ function Home({ activity, collections }) {
               </div>
             </div>
           )}
+
+          <LoadMoreButton
+            visibleCount={visibleHistoryCount}
+            totalCount={activity.recommendationHistory.length}
+            step={HISTORY_LOAD_STEP}
+            label="Load More History"
+            onLoadMore={() =>
+              setHistoryPagination({
+                key: historyItemsKey,
+                count: Math.min(
+                  visibleHistoryCount + HISTORY_LOAD_STEP,
+                  activity.recommendationHistory.length,
+                ),
+              })
+            }
+          />
         </section>
       </section>
 
@@ -916,6 +1083,18 @@ function SavedMoviesPage({ collection, collections }) {
   const removeMovie = isFavoritesPage
     ? collections.removeFavorite
     : collections.removeFromWatchlist;
+  const [collectionPagination, setCollectionPagination] = useState({
+    key: "",
+    count: INITIAL_VISIBLE_MOVIE_CARDS,
+  });
+  const collectionKey = `${collection}:${movies
+    .map((movie) => movie.id)
+    .join("|")}`;
+  const visibleMovieCount =
+    collectionPagination.key === collectionKey
+      ? collectionPagination.count
+      : INITIAL_VISIBLE_MOVIE_CARDS;
+  const visibleMovies = movies.slice(0, visibleMovieCount);
 
   return (
     <main className="app-shell collection-shell">
@@ -940,21 +1119,37 @@ function SavedMoviesPage({ collection, collections }) {
         </header>
 
         {movies.length > 0 ? (
-          <div className="movie-grid collection-grid">
-            {movies.map((movie) => (
-              <MovieCard
-                movie={movie}
-                collections={collections}
-                onRemove={removeMovie}
-                removeLabel={
-                  isFavoritesPage
-                    ? "Remove from Favorites"
-                    : "Remove from Watchlist"
-                }
-                key={movie.id}
-              />
-            ))}
-          </div>
+          <>
+            <div className="movie-grid collection-grid">
+              {visibleMovies.map((movie) => (
+                <MovieCard
+                  movie={movie}
+                  collections={collections}
+                  onRemove={removeMovie}
+                  removeLabel={
+                    isFavoritesPage
+                      ? "Remove from Favorites"
+                      : "Remove from Watchlist"
+                  }
+                  key={movie.id}
+                />
+              ))}
+            </div>
+
+            <LoadMoreButton
+              visibleCount={visibleMovieCount}
+              totalCount={movies.length}
+              onLoadMore={() =>
+                setCollectionPagination({
+                  key: collectionKey,
+                  count: Math.min(
+                    visibleMovieCount + MOVIE_LOAD_STEP,
+                    movies.length,
+                  ),
+                })
+              }
+            />
+          </>
         ) : (
           <div className="collection-empty">
             <div className="collection-empty-icon">
@@ -1018,7 +1213,19 @@ function App() {
         path="/movie/:id"
         element={<MovieDetails onMovieViewed={activity.addRecentlyViewed} />}
       />
-      <Route path="*" element={<Navigate to="/" replace />} />
+      <Route
+        path="*"
+        element={
+          <NotFound
+            navigation={
+              <SiteNav
+                favoritesCount={collections.favorites.length}
+                watchlistCount={collections.watchlist.length}
+              />
+            }
+          />
+        }
+      />
     </Routes>
   );
 }
