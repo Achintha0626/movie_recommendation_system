@@ -58,6 +58,9 @@ DEFAULT_GENRES = [
     "Thriller",
 ]
 
+MATCH_SCORE_MIN_PERCENT = 55
+MATCH_SCORE_MAX_PERCENT = 99
+
 
 def _parse_genres(raw_genres) -> tuple[str, ...]:
     """Convert the dataset's serialized TMDB genre objects into clean names."""
@@ -152,16 +155,54 @@ else:
     available_genres = DEFAULT_GENRES
 
 
-def _match_percentage(similarity_score) -> int:
+def _finite_similarity_score(similarity_score) -> float | None:
     try:
         score = float(similarity_score)
     except (TypeError, ValueError):
-        score = 0.0
+        return None
 
     if not math.isfinite(score):
+        return None
+
+    return score
+
+
+def _raw_match_percentage(similarity_score) -> int:
+    score = _finite_similarity_score(similarity_score)
+    if score is None:
         score = 0.0
 
     return int(round(max(0.0, min(1.0, score)) * 100))
+
+
+def _match_percentage(similarity_score, comparison_scores=None) -> int:
+    score = _finite_similarity_score(similarity_score)
+    if score is None:
+        return 0
+
+    if comparison_scores is not None:
+        finite_scores = [
+            finite_score
+            for candidate_score in comparison_scores
+            if (finite_score := _finite_similarity_score(candidate_score)) is not None
+        ]
+
+        if finite_scores:
+            min_score = min(finite_scores)
+            max_score = max(finite_scores)
+
+            if max_score > min_score:
+                normalized_score = (score - min_score) / (max_score - min_score)
+                normalized_score = max(0.0, min(1.0, normalized_score))
+                return int(
+                    round(
+                        MATCH_SCORE_MIN_PERCENT
+                        + normalized_score
+                        * (MATCH_SCORE_MAX_PERCENT - MATCH_SCORE_MIN_PERCENT)
+                    )
+                )
+
+    return _raw_match_percentage(score)
 
 
 def _recommendation_reasons(
@@ -171,7 +212,7 @@ def _recommendation_reasons(
 ) -> list[str]:
     reasons = []
 
-    if _match_percentage(similarity_score) >= 70:
+    if _raw_match_percentage(similarity_score) >= 70:
         reasons.append("Similar story overview")
 
     if movie_genre_keys.iloc[selected_index] & movie_genre_keys.iloc[recommended_index]:
@@ -441,7 +482,13 @@ def recommend(movie_title: str, genre: str | None = None):
         return {"error": "Movie not found"}
 
     idx = int(indices[movie_title])
-    ranked_scores = list(enumerate(sig[idx]))
+    movie_similarity_scores = list(enumerate(sig[idx]))
+    comparison_scores = [
+        similarity_score
+        for movie_index, similarity_score in movie_similarity_scores
+        if movie_index != idx
+    ]
+    ranked_scores = movie_similarity_scores
     ranked_scores = sorted(
         ranked_scores, key=lambda item: item[1], reverse=True
     )[1:11]
@@ -485,7 +532,7 @@ def recommend(movie_title: str, genre: str | None = None):
     recommendations = [
         {
             **movie,
-            "match_score": _match_percentage(similarity_score),
+            "match_score": _match_percentage(similarity_score, comparison_scores),
             "reasons": _recommendation_reasons(
                 idx, movie_index, similarity_score
             ),
