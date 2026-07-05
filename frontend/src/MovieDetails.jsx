@@ -1,9 +1,8 @@
 import { useEffect, useState } from "react";
 import axios from "axios";
 import { Link, useParams } from "react-router-dom";
+import { API_BASE_URL } from "./config";
 import "./MovieDetails.css";
-
-const API_URL = "http://127.0.0.1:8000";
 
 function ArrowLeftIcon() {
   return (
@@ -66,7 +65,7 @@ function MovieDetails({ onMovieViewed }) {
     }
 
     axios
-      .get(`${API_URL}/movie/${id}`, { signal: controller.signal })
+      .get(`${API_BASE_URL}/movie/${id}`, { signal: controller.signal })
       .then((response) => {
         setRequestState({ id, movie: response.data, error: "" });
         onMovieViewed(response.data);

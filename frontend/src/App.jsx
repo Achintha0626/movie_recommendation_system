@@ -3,11 +3,11 @@ import axios from "axios";
 import { Link, Navigate, NavLink, Route, Routes } from "react-router-dom";
 import Dashboard from "./Dashboard";
 import MovieDetails from "./MovieDetails";
+import { API_BASE_URL } from "./config";
 import useMovieActivity from "./useMovieActivity";
 import useMovieCollections from "./useMovieCollections";
 import "./App.css";
 
-const API_URL = "http://127.0.0.1:8000";
 const DEFAULT_GENRES = [
   "All",
   "Action",
@@ -329,7 +329,7 @@ function Home({ activity, collections }) {
     const controller = new AbortController();
 
     axios
-      .get(`${API_URL}/trending`, { signal: controller.signal })
+      .get(`${API_BASE_URL}/trending`, { signal: controller.signal })
       .then((response) => {
         setTrendingState({
           status: "success",
@@ -349,7 +349,7 @@ function Home({ activity, collections }) {
     const controller = new AbortController();
 
     axios
-      .get(`${API_URL}/genres`, { signal: controller.signal })
+      .get(`${API_BASE_URL}/genres`, { signal: controller.signal })
       .then((response) => {
         const genres = Array.isArray(response.data.genres)
           ? response.data.genres.filter(
@@ -377,7 +377,7 @@ function Home({ activity, collections }) {
     const controller = new AbortController();
     const debounceTimer = window.setTimeout(() => {
       axios
-        .get(`${API_URL}/search`, {
+        .get(`${API_BASE_URL}/search`, {
           params: { query: searchQuery },
           signal: controller.signal,
         })
@@ -499,7 +499,7 @@ function Home({ activity, collections }) {
 
     try {
       const res = await axios.get(
-        `${API_URL}/recommend/${encodeURIComponent(movieTitle)}`,
+        `${API_BASE_URL}/recommend/${encodeURIComponent(movieTitle)}`,
         { params: { genre: selectedGenre } },
       );
 

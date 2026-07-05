@@ -21,12 +21,17 @@ TMDB_ORIGINAL_IMAGE_BASE_URL = "https://image.tmdb.org/t/p/original"
 
 load_dotenv(BASE_DIR / ".env")
 TMDB_API_KEY = os.getenv("TMDB_API_KEY", "").strip()
+FRONTEND_URL = os.getenv("FRONTEND_URL", "").strip().rstrip("/")
+
+allowed_origins = [FRONTEND_URL] if FRONTEND_URL else []
 
 app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allowed_origins,
+    allow_origin_regex=r"https?://(localhost|127\.0\.0\.1)(:\d+)?",
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -347,6 +352,11 @@ def get_movies():
     return movie_titles
 
 
+@app.get("/health")
+def health_check():
+    return {"status": "ok"}
+
+
 @app.get("/search")
 def search_movies(query: str = ""):
     normalized_query = query.strip().casefold()
@@ -491,3 +501,10 @@ def recommend(movie_title: str, genre: str | None = None):
 @app.get("/movie/{tmdb_id}")
 def movie_details(tmdb_id: int):
     return get_tmdb_movie_details(tmdb_id)
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    port = int(os.getenv("PORT", "8000"))
+    uvicorn.run(app, host="0.0.0.0", port=port)
