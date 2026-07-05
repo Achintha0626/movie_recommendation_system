@@ -7,8 +7,7 @@ A full-stack Movie Recommendation System powered by Machine Learning and TMDB me
 ### Frontend
 https://movie-recommendation-system-nu-pearl.vercel.app
 
-### Backend API
-https://movie-recommendation-system-do3f.onrender.com
+
 
 ---
 
