@@ -3,8 +3,8 @@ import joblib
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import sigmoid_kernel
 
-DATA_FILE = "dumped_obj/movie_dataframe_updated_TEST.csv"
-OUTPUT_FILE = "dumped_obj/sigmoid_kernel_TEST.pkl"
+DATA_FILE = "dumped_obj/movie_dataframe_for_app.csv"
+OUTPUT_FILE = "dumped_obj/sigmoid_kernel.pkl"
 
 df = pd.read_csv(DATA_FILE)
 
