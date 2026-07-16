@@ -1,10 +1,9 @@
 import { useEffect, useRef, useState } from "react";
-import axios from "axios";
 import { Link, NavLink, Route, Routes } from "react-router-dom";
 import Dashboard from "./Dashboard";
 import MovieDetails from "./MovieDetails";
 import NotFound from "./NotFound";
-import { API_BASE_URL } from "./config";
+import { apiClient } from "./config";
 import useMovieActivity from "./useMovieActivity";
 import useMovieCollections from "./useMovieCollections";
 import "./App.css";
@@ -28,6 +27,55 @@ const INITIAL_VISIBLE_MOVIE_CARDS = 6;
 const MOVIE_LOAD_STEP = 6;
 const INITIAL_VISIBLE_HISTORY_ITEMS = 4;
 const HISTORY_LOAD_STEP = 4;
+const ENABLE_RECOMMENDATION_TIMING = import.meta.env.DEV;
+
+function createRecommendationTiming(movieTitle, genre) {
+  return {
+    movieTitle,
+    genre,
+    searchSubmitted: performance.now(),
+    requestStarted: null,
+    responseReceived: null,
+    stateProcessingStarted: null,
+    stateUpdated: null,
+    rendered: null,
+  };
+}
+
+function markRecommendationTiming(timing, key) {
+  if (!timing) return;
+
+  timing[key] = performance.now();
+
+  if (ENABLE_RECOMMENDATION_TIMING) {
+    console.debug(
+      `[CineMatch timing] ${key}: ${timing[key].toFixed(2)} ms`,
+    );
+  }
+}
+
+function logRecommendationTimingSummary(timing) {
+  if (!ENABLE_RECOMMENDATION_TIMING || !timing) return;
+
+  const apiRequest = timing.responseReceived - timing.requestStarted;
+  const stateProcessing = timing.stateUpdated - timing.stateProcessingStarted;
+  const renderDelay = timing.rendered - timing.stateUpdated;
+  const totalVisible = timing.rendered - timing.searchSubmitted;
+
+  console.groupCollapsed(
+    `[CineMatch timing] ${timing.movieTitle} (${timing.genre})`,
+  );
+  console.log("search submitted:", `${timing.searchSubmitted.toFixed(2)} ms`);
+  console.log("recommendation request started:", `${timing.requestStarted.toFixed(2)} ms`);
+  console.log("recommendation response received:", `${timing.responseReceived.toFixed(2)} ms`);
+  console.log("state updated:", `${timing.stateUpdated.toFixed(2)} ms`);
+  console.log("recommendation list rendered:", `${timing.rendered.toFixed(2)} ms`);
+  console.log("API request:", `${apiRequest.toFixed(2)} ms`);
+  console.log("State processing:", `${stateProcessing.toFixed(2)} ms`);
+  console.log("Render delay:", `${renderDelay.toFixed(2)} ms`);
+  console.log("Total user-visible time:", `${totalVisible.toFixed(2)} ms`);
+  console.groupEnd();
+}
 
 function FilmIcon() {
   return (
@@ -131,6 +179,8 @@ function MovieCard({
   const reasons = Array.isArray(movie.reasons)
     ? movie.reasons.filter((reason) => typeof reason === "string" && reason)
     : [];
+  const explanation =
+    typeof movie.explanation === "string" ? movie.explanation.trim() : "";
 
   const content = (
     <>
@@ -167,6 +217,9 @@ function MovieCard({
               <span className="match-score-badge">{matchScore}% Match</span>
               <span>Why this pick</span>
             </div>
+            {explanation && (
+              <p className="recommendation-copy">{explanation}</p>
+            )}
             <div className="reason-chips" aria-label="Recommendation reasons">
               {(reasons.length > 0
                 ? reasons
@@ -371,6 +424,9 @@ function Home({ activity, collections }) {
   const [error, setError] = useState("");
   const recommendationsRef = useRef(null);
   const shouldScrollToRecommendations = useRef(false);
+  const activeRecommendationRequest = useRef(null);
+  const recommendationTiming = useRef(null);
+  const shouldLogRecommendationRender = useRef(false);
 
   const searchQuery = searchTerm.trim();
   const hasCurrentResponse = searchResponse.query === searchQuery;
@@ -380,30 +436,18 @@ function Home({ activity, collections }) {
 
   useEffect(() => {
     const controller = new AbortController();
-
-    axios
-      .get(`${API_BASE_URL}/trending`, { signal: controller.signal })
-      .then((response) => {
-        setTrendingState({
-          status: "success",
-          movies: response.data.results || [],
-        });
-        setVisibleTrendingCount(INITIAL_VISIBLE_MOVIE_CARDS);
-      })
-      .catch((requestError) => {
-        if (requestError.code !== "ERR_CANCELED") {
-          setTrendingState({ status: "error", movies: [] });
-        }
-      });
-
-    return () => controller.abort();
-  }, []);
-
-  useEffect(() => {
-    const controller = new AbortController();
-
-    axios
-      .get(`${API_BASE_URL}/genres`, { signal: controller.signal })
+    const trendingRequest = apiClient
+      .get("/trending", { signal: controller.signal })
+      .then((response) => ({
+        status: "success",
+        movies: response.data.results || [],
+      }))
+      .catch((requestError) => ({
+        status: requestError.code === "ERR_CANCELED" ? "canceled" : "error",
+        movies: [],
+      }));
+    const genresRequest = apiClient
+      .get("/genres", { signal: controller.signal })
       .then((response) => {
         const genres = Array.isArray(response.data.genres)
           ? response.data.genres.filter(
@@ -411,16 +455,34 @@ function Home({ activity, collections }) {
             )
           : [];
 
-        setGenreState({
+        return {
           status: "success",
           genres: genres.length > 0 ? genres : DEFAULT_GENRES,
-        });
+        };
       })
-      .catch((requestError) => {
-        if (requestError.code !== "ERR_CANCELED") {
-          setGenreState({ status: "error", genres: DEFAULT_GENRES });
-        }
-      });
+      .catch((requestError) => ({
+        status: requestError.code === "ERR_CANCELED" ? "canceled" : "error",
+        genres: DEFAULT_GENRES,
+      }));
+
+    Promise.all([trendingRequest, genresRequest]).then(
+      ([trendingResult, genresResult]) => {
+        if (controller.signal.aborted) return;
+
+        setTrendingState(
+          trendingResult.status === "success"
+            ? { status: "success", movies: trendingResult.movies }
+            : { status: "error", movies: [] },
+        );
+        setVisibleTrendingCount(INITIAL_VISIBLE_MOVIE_CARDS);
+
+        setGenreState(
+          genresResult.status === "success"
+            ? { status: "success", genres: genresResult.genres }
+            : { status: "error", genres: DEFAULT_GENRES },
+        );
+      },
+    );
 
     return () => controller.abort();
   }, []);
@@ -429,32 +491,29 @@ function Home({ activity, collections }) {
     if (!isSuggestionsOpen || !searchQuery) return undefined;
 
     const controller = new AbortController();
-    const debounceTimer = window.setTimeout(() => {
-      axios
-        .get(`${API_BASE_URL}/search`, {
-          params: { query: searchQuery },
-          signal: controller.signal,
-        })
-        .then((response) => {
+    apiClient
+      .get("/search", {
+        params: { query: searchQuery },
+        signal: controller.signal,
+      })
+      .then((response) => {
+        setSearchResponse({
+          query: searchQuery,
+          results: response.data.results || [],
+          error: false,
+        });
+      })
+      .catch((requestError) => {
+        if (requestError.code !== "ERR_CANCELED") {
           setSearchResponse({
             query: searchQuery,
-            results: response.data.results || [],
-            error: false,
+            results: [],
+            error: true,
           });
-        })
-        .catch((requestError) => {
-          if (requestError.code !== "ERR_CANCELED") {
-            setSearchResponse({
-              query: searchQuery,
-              results: [],
-              error: true,
-            });
-          }
-        });
-    }, 300);
+        }
+      });
 
     return () => {
-      window.clearTimeout(debounceTimer);
       controller.abort();
     };
   }, [isSuggestionsOpen, searchQuery]);
@@ -477,6 +536,26 @@ function Home({ activity, collections }) {
       block: "start",
     });
   }, [recommendations]);
+
+  useEffect(() => {
+    return () => {
+      activeRecommendationRequest.current?.controller.abort();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (
+      !shouldLogRecommendationRender.current ||
+      isRecommending ||
+      recommendations.length === 0
+    ) {
+      return;
+    }
+
+    shouldLogRecommendationRender.current = false;
+    markRecommendationTiming(recommendationTiming.current, "rendered");
+    logRecommendationTimingSummary(recommendationTiming.current);
+  }, [isRecommending, recommendations]);
 
   const selectSuggestion = (movieTitle) => {
     setSearchTerm(movieTitle);
@@ -549,6 +628,31 @@ function Home({ activity, collections }) {
     const movieTitle = selectedMovie.trim();
     if (!movieTitle) return;
 
+    const requestKey = `${movieTitle}::${selectedGenre}`;
+    const currentRequest = activeRecommendationRequest.current;
+
+    if (currentRequest?.key === requestKey) {
+      return;
+    }
+
+    currentRequest?.controller.abort();
+
+    const controller = new AbortController();
+    const timing = createRecommendationTiming(movieTitle, selectedGenre);
+    activeRecommendationRequest.current = { key: requestKey, controller };
+    recommendationTiming.current = timing;
+    shouldLogRecommendationRender.current = false;
+
+    if (ENABLE_RECOMMENDATION_TIMING) {
+      console.debug(
+        `[CineMatch timing] search submitted: ${timing.searchSubmitted.toFixed(2)} ms`,
+      );
+    }
+
+    const isCurrentRequest = () =>
+      activeRecommendationRequest.current?.key === requestKey &&
+      activeRecommendationRequest.current?.controller === controller;
+
     setIsRecommending(true);
     setError("");
     setIsSuggestionsOpen(false);
@@ -557,19 +661,28 @@ function Home({ activity, collections }) {
     setRecommendations([]);
 
     try {
-      const res = await axios.get(
-        `${API_BASE_URL}/recommend/${encodeURIComponent(movieTitle)}`,
-        { params: { genre: selectedGenre } },
+      markRecommendationTiming(timing, "requestStarted");
+      const res = await apiClient.get(
+        `/recommend/${encodeURIComponent(movieTitle)}`,
+        {
+          params: { genre: selectedGenre },
+          signal: controller.signal,
+        },
       );
+
+      if (!isCurrentRequest()) return;
+
+      markRecommendationTiming(timing, "responseReceived");
+      markRecommendationTiming(timing, "stateProcessingStarted");
 
       if (res.data.error) {
         setRecommendations([]);
         setError(res.data.error);
+        markRecommendationTiming(timing, "stateUpdated");
         return;
       }
 
       const receivedRecommendations = res.data.recommendations || [];
-      setRecommendationContext({ movieTitle, genre: selectedGenre });
 
       if (receivedRecommendations.length > 0) {
         activity.addRecommendationHistory({
@@ -578,6 +691,7 @@ function Home({ activity, collections }) {
           recommendations: receivedRecommendations,
         });
         shouldScrollToRecommendations.current = true;
+        shouldLogRecommendationRender.current = true;
         setRecommendations(receivedRecommendations);
       } else {
         setRecommendations([]);
@@ -585,7 +699,17 @@ function Home({ activity, collections }) {
           `No ${selectedGenre === "All" ? "" : `${selectedGenre} `}recommendations found for ${movieTitle}. Try another genre.`,
         );
       }
+
+      markRecommendationTiming(timing, "stateUpdated");
     } catch (requestError) {
+      if (
+        requestError.code === "ERR_CANCELED" ||
+        controller.signal.aborted ||
+        !isCurrentRequest()
+      ) {
+        return;
+      }
+
       const detail = requestError.response?.data?.detail;
       setRecommendations([]);
       setError(
@@ -594,7 +718,10 @@ function Home({ activity, collections }) {
           : "Something interrupted the search. Please give it another try.",
       );
     } finally {
-      setIsRecommending(false);
+      if (isCurrentRequest()) {
+        activeRecommendationRequest.current = null;
+        setIsRecommending(false);
+      }
     }
   };
 

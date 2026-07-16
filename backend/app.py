@@ -1,6 +1,7 @@
 import json
 import math
 import os
+import re
 from concurrent.futures import ThreadPoolExecutor
 from functools import lru_cache
 from pathlib import Path
@@ -11,6 +12,9 @@ import requests
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from services.explanation_service import ExplanationService
+from services.hybrid_ranking_service import HybridRankingService
+from services.semantic_similarity_service import SemanticSimilarityService
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -39,6 +43,13 @@ app.add_middleware(
 data = pd.read_csv(BASE_DIR / "dumped_obj" / "movie_data_for_app.csv")
 dataframe = pd.read_csv(BASE_DIR / "dumped_obj" / "movie_dataframe_for_app.csv")
 sig = joblib.load(BASE_DIR / "dumped_obj" / "sigmoid_kernel.pkl")
+semantic_similarity_service = SemanticSimilarityService(dataframe)
+hybrid_ranking_service = HybridRankingService(
+    dataframe,
+    sig,
+    semantic_similarity_service,
+)
+explanation_service = ExplanationService()
 
 indices = pd.Series(data.index, index=data["original_title"]).drop_duplicates()
 movie_titles = list(dict.fromkeys(data["original_title"].dropna().astype(str)))
@@ -60,6 +71,88 @@ DEFAULT_GENRES = [
 
 MATCH_SCORE_MIN_PERCENT = 55
 MATCH_SCORE_MAX_PERCENT = 99
+CONTENT_SIMILARITY_WEIGHT = 0.60
+GENRE_OVERLAP_WEIGHT = 0.15
+KEYWORD_OVERLAP_WEIGHT = 0.15
+POPULARITY_RATING_WEIGHT = 0.10
+FRANCHISE_TITLE_BOOST = 0.20
+TITLE_STOP_WORDS = {
+    "the",
+    "a",
+    "an",
+    "of",
+    "and",
+    "world",
+    "movie",
+    "part",
+    "to",
+    "in",
+    "on",
+    "at",
+    "for",
+}
+KNOWN_TMDB_GENRES = [
+    "Action",
+    "Adventure",
+    "Animation",
+    "Comedy",
+    "Crime",
+    "Documentary",
+    "Drama",
+    "Family",
+    "Fantasy",
+    "History",
+    "Horror",
+    "Music",
+    "Mystery",
+    "Romance",
+    "Science Fiction",
+    "TV Movie",
+    "Thriller",
+    "War",
+    "Western",
+]
+WORD_RE = re.compile(r"[a-z0-9]+")
+
+
+def _word_tokens(text) -> tuple[str, ...]:
+    if text is None or (isinstance(text, float) and pd.isna(text)):
+        return ()
+
+    return tuple(WORD_RE.findall(str(text).casefold()))
+
+
+def _important_title_tokens(title) -> frozenset[str]:
+    return frozenset(
+        token
+        for token in _word_tokens(title)
+        if len(token) > 1 and token not in TITLE_STOP_WORDS
+    )
+
+
+def _normalize_movie_genre(name: str) -> str:
+    clean_name = name.strip()
+    return "Sci-Fi" if clean_name.casefold() == "science fiction" else clean_name
+
+
+def _parse_plain_genres(raw_genres: str) -> tuple[str, ...]:
+    normalized = raw_genres.casefold()
+    names = [
+        _normalize_movie_genre(genre)
+        for genre in KNOWN_TMDB_GENRES
+        if genre.casefold() in normalized
+    ]
+
+    if names:
+        return tuple(dict.fromkeys(names))
+
+    return tuple(
+        dict.fromkeys(
+            part.strip().title()
+            for part in re.split(r"[,|;/]+", raw_genres)
+            if part.strip()
+        )
+    )
 
 
 def _parse_genres(raw_genres) -> tuple[str, ...]:
@@ -70,10 +163,10 @@ def _parse_genres(raw_genres) -> tuple[str, ...]:
     try:
         genres = json.loads(raw_genres) if isinstance(raw_genres, str) else raw_genres
     except (json.JSONDecodeError, TypeError):
-        return ()
+        return _parse_plain_genres(raw_genres) if isinstance(raw_genres, str) else ()
 
     if not isinstance(genres, list):
-        return ()
+        return _parse_plain_genres(raw_genres) if isinstance(raw_genres, str) else ()
 
     names = []
     for genre in genres:
@@ -81,8 +174,7 @@ def _parse_genres(raw_genres) -> tuple[str, ...]:
         if not isinstance(name, str) or not name.strip():
             continue
 
-        clean_name = "Sci-Fi" if name.strip().casefold() == "science fiction" else name.strip()
-        names.append(clean_name)
+        names.append(_normalize_movie_genre(name))
 
     return tuple(dict.fromkeys(names))
 
@@ -93,7 +185,7 @@ movie_genre_keys = movie_genres.apply(
 )
 
 
-def _parse_names(raw_items) -> frozenset[str]:
+def _parse_names(raw_items, split_plain_text: bool = False) -> frozenset[str]:
     """Extract normalized names from serialized keywords or cast data."""
     if raw_items is None or (isinstance(raw_items, float) and pd.isna(raw_items)):
         return frozenset()
@@ -101,9 +193,22 @@ def _parse_names(raw_items) -> frozenset[str]:
     try:
         items = json.loads(raw_items) if isinstance(raw_items, str) else raw_items
     except (json.JSONDecodeError, TypeError):
-        return frozenset()
+        if not isinstance(raw_items, str) or not raw_items.strip():
+            return frozenset()
+
+        if split_plain_text:
+            return frozenset(_word_tokens(raw_items))
+
+        return frozenset({raw_items.strip().casefold()})
 
     if not isinstance(items, list):
+        if isinstance(raw_items, str) and raw_items.strip():
+            return (
+                frozenset(_word_tokens(raw_items))
+                if split_plain_text
+                else frozenset({raw_items.strip().casefold()})
+            )
+
         return frozenset()
 
     return frozenset(
@@ -123,9 +228,15 @@ def _parse_directors(raw_crew) -> frozenset[str]:
     try:
         crew = json.loads(raw_crew) if isinstance(raw_crew, str) else raw_crew
     except (json.JSONDecodeError, TypeError):
+        if isinstance(raw_crew, str) and raw_crew.strip():
+            return frozenset({raw_crew.strip().casefold()})
+
         return frozenset()
 
     if not isinstance(crew, list):
+        if isinstance(raw_crew, str) and raw_crew.strip():
+            return frozenset({raw_crew.strip().casefold()})
+
         return frozenset()
 
     return frozenset(
@@ -138,9 +249,12 @@ def _parse_directors(raw_crew) -> frozenset[str]:
     )
 
 
-movie_keywords = dataframe["keywords"].apply(_parse_names)
+movie_keywords = dataframe["keywords"].apply(
+    lambda keywords: _parse_names(keywords, split_plain_text=True)
+)
 movie_cast = dataframe["cast"].apply(_parse_names)
 movie_directors = dataframe["crew"].apply(_parse_directors)
+movie_title_tokens = dataframe["original_title"].apply(_important_title_tokens)
 dataset_genres = {genre for genres in movie_genres for genre in genres}
 
 if dataset_genres:
@@ -165,6 +279,100 @@ def _finite_similarity_score(similarity_score) -> float | None:
         return None
 
     return score
+
+
+def _clamped_score(score) -> float:
+    finite_score = _finite_similarity_score(score)
+    if finite_score is None:
+        return 0.0
+
+    return max(0.0, min(1.0, finite_score))
+
+
+def _numeric_series(column_name: str) -> pd.Series:
+    if column_name not in dataframe:
+        return pd.Series([0.0] * len(dataframe), index=dataframe.index)
+
+    return pd.to_numeric(dataframe[column_name], errors="coerce").fillna(0.0)
+
+
+def _normalize_series(series: pd.Series) -> pd.Series:
+    finite_series = pd.to_numeric(series, errors="coerce").fillna(0.0)
+    min_value = finite_series.min()
+    max_value = finite_series.max()
+
+    if max_value <= min_value:
+        return pd.Series([0.0] * len(finite_series), index=finite_series.index)
+
+    return (finite_series - min_value) / (max_value - min_value)
+
+
+popularity_score = _normalize_series(_numeric_series("popularity"))
+rating_score = (_numeric_series("vote_average") / 10).clip(0.0, 1.0)
+vote_count_score = _normalize_series(_numeric_series("vote_count").apply(math.log1p))
+movie_popularity_rating_score = (
+    (popularity_score * 0.45) +
+    (rating_score * 0.35) +
+    (vote_count_score * 0.20)
+).clip(0.0, 1.0)
+
+
+def _selected_overlap_score(selected_values, candidate_values) -> float:
+    if not selected_values or not candidate_values:
+        return 0.0
+
+    return len(selected_values & candidate_values) / len(selected_values)
+
+
+def _keyword_overlap_score(selected_keywords, candidate_keywords) -> float:
+    if not selected_keywords or not candidate_keywords:
+        return 0.0
+
+    shared_count = len(selected_keywords & candidate_keywords)
+    if shared_count == 0:
+        return 0.0
+
+    return min(1.0, shared_count / min(len(selected_keywords), 6))
+
+
+def _title_overlap_score(selected_index: int, recommended_index: int) -> float:
+    selected_tokens = movie_title_tokens.iloc[selected_index]
+    recommended_tokens = movie_title_tokens.iloc[recommended_index]
+
+    return _selected_overlap_score(selected_tokens, recommended_tokens)
+
+
+def _hybrid_score_parts(
+    selected_index: int,
+    recommended_index: int,
+    similarity_score,
+) -> dict[str, float]:
+    genre_score = _selected_overlap_score(
+        movie_genre_keys.iloc[selected_index],
+        movie_genre_keys.iloc[recommended_index],
+    )
+    keyword_score = _keyword_overlap_score(
+        movie_keywords.iloc[selected_index],
+        movie_keywords.iloc[recommended_index],
+    )
+    content_score = _clamped_score(similarity_score)
+    popularity_rating = float(movie_popularity_rating_score.iloc[recommended_index])
+    title_score = _title_overlap_score(selected_index, recommended_index)
+    base_score = (
+        (CONTENT_SIMILARITY_WEIGHT * content_score) +
+        (GENRE_OVERLAP_WEIGHT * genre_score) +
+        (KEYWORD_OVERLAP_WEIGHT * keyword_score) +
+        (POPULARITY_RATING_WEIGHT * popularity_rating)
+    )
+
+    return {
+        "content": content_score,
+        "genre": genre_score,
+        "keyword": keyword_score,
+        "popularity_rating": popularity_rating,
+        "title": title_score,
+        "hybrid": min(1.0, base_score + (FRANCHISE_TITLE_BOOST * title_score)),
+    }
 
 
 def _raw_match_percentage(similarity_score) -> int:
@@ -209,16 +417,24 @@ def _recommendation_reasons(
     selected_index: int,
     recommended_index: int,
     similarity_score,
+    score_parts: dict[str, float] | None = None,
 ) -> list[str]:
+    if score_parts is None:
+        score_parts = _hybrid_score_parts(
+            selected_index,
+            recommended_index,
+            similarity_score,
+        )
+
     reasons = []
 
-    if _raw_match_percentage(similarity_score) >= 70:
-        reasons.append("Similar story overview")
+    if score_parts["title"] > 0:
+        reasons.append("Same franchise / similar title")
 
-    if movie_genre_keys.iloc[selected_index] & movie_genre_keys.iloc[recommended_index]:
+    if score_parts["genre"] > 0:
         reasons.append("Similar genre")
 
-    if movie_keywords.iloc[selected_index] & movie_keywords.iloc[recommended_index]:
+    if score_parts["keyword"] > 0:
         reasons.append("Similar keywords")
 
     if movie_cast.iloc[selected_index] & movie_cast.iloc[recommended_index]:
@@ -226,6 +442,12 @@ def _recommendation_reasons(
 
     if movie_directors.iloc[selected_index] & movie_directors.iloc[recommended_index]:
         reasons.append("Same director")
+
+    if score_parts["popularity_rating"] >= 0.60:
+        reasons.append("Popular/high-rated movie")
+
+    if score_parts["content"] >= 0.70:
+        reasons.append("Similar story overview")
 
     return reasons or ["Similar story overview"]
 
@@ -482,19 +704,10 @@ def recommend(movie_title: str, genre: str | None = None):
         return {"error": "Movie not found"}
 
     idx = int(indices[movie_title])
-    movie_similarity_scores = list(enumerate(sig[idx]))
-    comparison_scores = [
-        similarity_score
-        for movie_index, similarity_score in movie_similarity_scores
-        if movie_index != idx
-    ]
-    ranked_scores = movie_similarity_scores
-    ranked_scores = sorted(
-        ranked_scores, key=lambda item: item[1], reverse=True
-    )[1:11]
 
     requested_genre = (genre or "All").strip()
     normalized_genre = requested_genre.casefold()
+    genre_filter = None
 
     if normalized_genre and normalized_genre != "all":
         genre_lookup = {
@@ -509,38 +722,34 @@ def recommend(movie_title: str, genre: str | None = None):
                 detail=f"Unknown genre: {requested_genre}",
             )
 
-        ranked_scores = [
-            (movie_index, similarity_score)
-            for movie_index, similarity_score in ranked_scores
-            if any(
-                movie_genre.casefold() == canonical_genre.casefold()
-                for movie_genre in movie_genres.iloc[movie_index]
-            )
-        ]
+        genre_filter = canonical_genre
 
-    candidates = [
-        (movie_index, similarity_score, dataframe["original_title"].iloc[movie_index])
-        for movie_index, similarity_score in ranked_scores
-        if pd.notna(dataframe["original_title"].iloc[movie_index])
-    ]
-    recommendation_titles = [candidate[2] for candidate in candidates]
+    candidates = hybrid_ranking_service.recommend(
+        idx,
+        genre_filter=genre_filter,
+        limit=10,
+    )
+    recommendation_titles = [candidate["title"] for candidate in candidates]
 
     # The ranking logic above remains local; only metadata lookup is parallelized.
     with ThreadPoolExecutor(max_workers=5) as executor:
         enriched_movies = list(executor.map(search_tmdb_movie, recommendation_titles))
 
-    recommendations = [
-        {
+    recommendations = []
+    selected_movie = dataframe.iloc[idx]
+
+    for movie, candidate in zip(enriched_movies, candidates):
+        recommended_movie = dataframe.iloc[candidate["index"]]
+        recommendations.append({
             **movie,
-            "match_score": _match_percentage(similarity_score, comparison_scores),
-            "reasons": _recommendation_reasons(
-                idx, movie_index, similarity_score
+            "match_score": candidate["match_score"],
+            "reasons": candidate["reasons"],
+            "explanation": explanation_service.explain(
+                selected_movie,
+                recommended_movie,
+                candidate.get("parts", {}),
             ),
-        }
-        for movie, (movie_index, similarity_score, _) in zip(
-            enriched_movies, candidates
-        )
-    ]
+        })
 
     return {"movie": movie_title, "recommendations": recommendations}
 

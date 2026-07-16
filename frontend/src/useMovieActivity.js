@@ -27,6 +27,8 @@ function prepareMovie(movie, includeRecommendationData = false) {
     prepared.reasons = Array.isArray(movie.reasons)
       ? movie.reasons.filter((reason) => typeof reason === "string" && reason)
       : ["Similar story overview"];
+    prepared.explanation =
+      typeof movie.explanation === "string" ? movie.explanation.trim() : "";
   }
 
   return prepared;
