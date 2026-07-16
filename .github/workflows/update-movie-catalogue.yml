@@ -1,0 +1,178 @@
+name: Update Movie Catalogue
+
+on:
+  schedule:
+    - cron: "17 2 * * 0"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-movie-catalogue
+  cancel-in-progress: false
+
+jobs:
+  update-movie-catalogue:
+    name: Synchronize and rebuild catalogue
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Verify TMDB secret
+        env:
+          TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
+        run: |
+          if [ -z "$TMDB_API_KEY" ]; then
+            echo "TMDB_API_KEY secret is not configured."
+            exit 1
+          fi
+
+      - name: Synchronize changed TMDB movies
+        working-directory: backend
+        env:
+          TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
+        run: python update_movies.py
+
+      - name: Check whether catalogue changed
+        id: catalogue_changes
+        run: |
+          changes="$(git status --porcelain -- \
+            backend/dumped_obj/movie_dataframe_for_app.csv \
+            backend/dumped_obj/movie_data_for_app.csv)"
+
+          if [ -z "$changes" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "No catalogue changes detected."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "Catalogue changes detected."
+          fi
+
+      - name: Rebuild metadata similarity matrix
+        if: steps.catalogue_changes.outputs.changed == 'true'
+        working-directory: backend
+        run: python rebuild_similarity.py
+
+      - name: Rebuild semantic embeddings
+        if: steps.catalogue_changes.outputs.changed == 'true'
+        working-directory: backend
+        run: python services/embedding_service.py
+
+      - name: Validate generated catalogue artifacts
+        if: steps.catalogue_changes.outputs.changed == 'true'
+        working-directory: backend
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import json
+          import sys
+
+          import joblib
+          import pandas as pd
+
+          base = Path("dumped_obj")
+
+          dataframe_path = base / "movie_dataframe_for_app.csv"
+          app_data_path = base / "movie_data_for_app.csv"
+          similarity_path = base / "sigmoid_kernel.pkl"
+          embeddings_path = base / "semantic_embeddings.pkl"
+          metadata_path = base / "embedding_metadata.json"
+
+          required_files = [
+              dataframe_path,
+              app_data_path,
+              similarity_path,
+              embeddings_path,
+              metadata_path,
+          ]
+
+          missing = [str(path) for path in required_files if not path.exists()]
+
+          if missing:
+              print("Missing generated files:")
+              for path in missing:
+                  print(f"- {path}")
+              sys.exit(1)
+
+          dataframe = pd.read_csv(dataframe_path)
+          app_data = pd.read_csv(app_data_path)
+          similarity = joblib.load(similarity_path)
+          embeddings = joblib.load(embeddings_path)
+
+          with metadata_path.open("r", encoding="utf-8") as file:
+              metadata = json.load(file)
+
+          movie_count = len(dataframe)
+
+          if len(app_data) != movie_count:
+              raise SystemExit(
+                  f"CSV row count mismatch: dataframe={movie_count}, "
+                  f"app_data={len(app_data)}"
+              )
+
+          if getattr(similarity, "shape", None) != (movie_count, movie_count):
+              raise SystemExit(
+                  f"Similarity shape mismatch: "
+                  f"{getattr(similarity, 'shape', None)}"
+              )
+
+          if getattr(embeddings, "ndim", None) != 2:
+              raise SystemExit("Embeddings must be a 2D matrix.")
+
+          if embeddings.shape[0] != movie_count:
+              raise SystemExit(
+                  f"Embedding count mismatch: "
+                  f"embeddings={embeddings.shape[0]}, movies={movie_count}"
+              )
+
+          if metadata.get("movie_count") != movie_count:
+              raise SystemExit(
+                  f"Embedding metadata mismatch: "
+                  f"metadata={metadata.get('movie_count')}, movies={movie_count}"
+              )
+
+          print("Catalogue artifact validation passed.")
+          print(f"Movie rows: {movie_count}")
+          print(f"Similarity shape: {similarity.shape}")
+          print(f"Embedding shape: {embeddings.shape}")
+          PY
+
+      - name: Configure git author
+        if: steps.catalogue_changes.outputs.changed == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Commit generated catalogue artifacts
+        if: steps.catalogue_changes.outputs.changed == 'true'
+        run: |
+          git add \
+            backend/dumped_obj/movie_dataframe_for_app.csv \
+            backend/dumped_obj/movie_data_for_app.csv \
+            backend/dumped_obj/sigmoid_kernel.pkl \
+            backend/dumped_obj/semantic_embeddings.pkl \
+            backend/dumped_obj/embedding_metadata.json
+
+          if git diff --cached --quiet; then
+            echo "No generated changes to commit."
+          else
+            git commit -m "chore: update movie catalogue and recommendation artifacts"
+            git push
+          fi

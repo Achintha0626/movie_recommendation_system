@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
-import axios from "axios";
 import { Link, useParams } from "react-router-dom";
-import { API_BASE_URL } from "./config";
+import { apiClient } from "./config";
 import "./MovieDetails.css";
 
 function ArrowLeftIcon() {
@@ -139,8 +138,8 @@ function MovieDetails({ onMovieViewed }) {
       return () => controller.abort();
     }
 
-    axios
-      .get(`${API_BASE_URL}/movie/${id}`, { signal: controller.signal })
+    apiClient
+      .get(`/movie/${id}`, { signal: controller.signal })
       .then((response) => {
         setRequestState({ id, movie: response.data, error: "" });
         onMovieViewed(response.data);

@@ -1264,6 +1264,13 @@ svg {
   letter-spacing: 0.01em;
 }
 
+.recommendation-copy {
+  margin: 0.65rem 0 0;
+  color: #b8adbf;
+  font-size: 0.68rem;
+  line-height: 1.5;
+}
+
 .reason-chips {
   display: flex;
   flex-wrap: wrap;
