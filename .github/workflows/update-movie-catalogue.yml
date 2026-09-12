@@ -33,6 +33,13 @@ jobs:
         working-directory: backend
         run: |
           python -m pip install --upgrade pip
+
+          # Install CPU-only PyTorch.
+          # Sentence Transformers requires PyTorch, but GitHub Actions
+          # does not need the large NVIDIA/CUDA packages.
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+
+          # Install the remaining backend dependencies.
           pip install -r requirements.txt
 
       - name: Verify TMDB secret
