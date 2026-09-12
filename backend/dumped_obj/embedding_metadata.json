@@ -1,6 +1,6 @@
 {
   "model": "all-MiniLM-L6-v2",
   "embedding_dimension": 384,
-  "movie_count": 1361,
-  "created_at": "2026-07-12T12:02:42.561398+00:00"
+  "movie_count": 1368,
+  "created_at": "2026-09-10T16:33:19.587413+00:00"
 }

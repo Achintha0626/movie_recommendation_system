@@ -51,11 +51,11 @@ jobs:
             exit 1
           fi
 
-      - name: Synchronize changed TMDB movies
+      - name: Incrementally update movie catalogue
         working-directory: backend
         env:
           TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
-        run: python update_movies.py
+        run: python scripts/incremental_update.py
 
       - name: Check whether catalogue changed
         id: catalogue_changes
