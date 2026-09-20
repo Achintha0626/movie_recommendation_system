@@ -27,6 +27,9 @@ class TMDBService:
 
     def __init__(self):
         self.api_key = API_KEY
+
+        self.session = requests.Session()
+
         self.last_sync_stats = {
             "checked": 0,
             "skipped": 0,
@@ -45,7 +48,11 @@ class TMDBService:
         url = f"{BASE_URL}{endpoint}"
 
         try:
-            response = requests.get(url, params=params)
+            response = self.session.get(
+                url,
+                params=params,
+                timeout=20,
+            )
         except requests.RequestException:
             raise TMDBRequestError("request", endpoint) from None
 
@@ -56,8 +63,6 @@ class TMDBService:
             response.raise_for_status()
         except requests.HTTPError:
             raise TMDBRequestError(response.status_code, endpoint) from None
-
-        time.sleep(0.25)
 
         return response.json()
 
@@ -118,6 +123,11 @@ class TMDBService:
 
             total_pages = data.get("total_pages", 1) or 1
 
+            print(
+                f"Processing TMDB changes page "
+                f"{page}/{total_pages}"
+            )
+
             for item in data.get("results", []):
                 movie_id = item.get("id")
 
@@ -126,22 +136,32 @@ class TMDBService:
                     continue
 
                 if movie_id in processed_ids:
-                    skipped += 1
                     continue
 
                 processed_ids.add(movie_id)
 
                 try:
-                    movies.append(self.fetch_movie_details(movie_id))
+                    movies.append(
+                        self.fetch_movie_details(movie_id)
+                    )
+
                 except TMDBNotFoundError:
                     skipped += 1
                     print(f"Skipped missing movie: {movie_id}")
+
                 except TMDBRequestError as e:
                     skipped += 1
-                    print(f"Skipped movie: {movie_id} ({e.status_code} error)")
+                    print(
+                        f"Skipped movie: {movie_id} "
+                        f"({e.status_code} error)"
+                    )
+
                 except Exception as e:
                     skipped += 1
-                    print(f"Skipped movie: {movie_id} ({type(e).__name__})")
+                    print(
+                        f"Skipped movie: {movie_id} "
+                        f"({type(e).__name__})"
+                    )
 
             page += 1
 
@@ -155,11 +175,20 @@ class TMDBService:
         return movies
 
     def fetch_movie_details(self, movie_id):
-        details = self.get(f"/movie/{movie_id}")
-        credits = self.get(f"/movie/{movie_id}/credits")
-        keywords = self.get(f"/movie/{movie_id}/keywords")
+
+        # One TMDB request instead of three separate requests.
+        details = self.get(
+            f"/movie/{movie_id}",
+            {
+                "append_to_response": "credits,keywords"
+            }
+        )
+
+        credits = details.get("credits", {})
+        keywords = details.get("keywords", {})
 
         director = ""
+
         for person in credits.get("crew", []):
             if person.get("job") == "Director":
                 director = person.get("name", "")
@@ -184,12 +213,18 @@ class TMDBService:
 
         production_companies = " ".join([
             company.get("name", "")
-            for company in details.get("production_companies", [])
+            for company in details.get(
+                "production_companies",
+                []
+            )
         ])
 
         spoken_languages = " ".join([
             lang.get("english_name", "")
-            for lang in details.get("spoken_languages", [])
+            for lang in details.get(
+                "spoken_languages",
+                []
+            )
         ])
 
         return {
@@ -197,7 +232,10 @@ class TMDBService:
             "genres": genres,
             "id": details.get("id"),
             "keywords": keyword_text,
-            "original_language": details.get("original_language", ""),
+            "original_language": details.get(
+                "original_language",
+                ""
+            ),
             "original_title": details.get("title", ""),
             "overview": details.get("overview", ""),
             "popularity": details.get("popularity", 0),
@@ -229,7 +267,13 @@ class TMDBService:
 
         for source in sources:
             for page in range(1, 3):
-                data = self.get(source, {"page": page})
+                data = self.get(
+                    source,
+                    {
+                        "page": page
+                    }
+                )
+
                 for movie in data.get("results", []):
                     movie_ids.add(movie["id"])
 
