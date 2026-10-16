@@ -51,7 +51,11 @@ hybrid_ranking_service = HybridRankingService(
 )
 explanation_service = ExplanationService()
 
-indices = pd.Series(data.index, index=data["original_title"]).drop_duplicates()
+indices = (
+    pd.Series(data.index.to_numpy(), index=data["original_title"])
+    .groupby(level=0, sort=False)
+    .first()
+)
 movie_titles = list(dict.fromkeys(data["original_title"].dropna().astype(str)))
 
 DEFAULT_GENRES = [
