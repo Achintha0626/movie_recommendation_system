@@ -1,8 +1,10 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, NavLink, Route, Routes } from "react-router-dom";
 import Dashboard from "./Dashboard";
 import MovieDetails from "./MovieDetails";
 import NotFound from "./NotFound";
+import TVDetails from "./TVDetails";
+import TVDiscovery from "./TVDiscovery";
 import { apiClient } from "./config";
 import useMovieActivity from "./useMovieActivity";
 import useMovieCollections from "./useMovieCollections";
@@ -24,7 +26,7 @@ const DEFAULT_GENRES = [
 ];
 
 const INITIAL_VISIBLE_MOVIE_CARDS = 6;
-const MOVIE_LOAD_STEP = 6;
+const MOVIE_LOAD_STEP = 4;
 const INITIAL_VISIBLE_HISTORY_ITEMS = 4;
 const HISTORY_LOAD_STEP = 4;
 const ENABLE_RECOMMENDATION_TIMING = import.meta.env.DEV;
@@ -126,6 +128,15 @@ function TrashIcon() {
   );
 }
 
+function TvIcon() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true">
+      <rect x="2" y="7" width="20" height="15" rx="2" ry="2" fill="none" stroke="currentColor" strokeWidth="2" />
+      <polyline points="17 2 12 7 7 2" fill="none" stroke="currentColor" strokeWidth="2" />
+    </svg>
+  );
+}
+
 function SiteNav({ favoritesCount, watchlistCount }) {
   const navClass = ({ isActive }) =>
     `site-nav-link ${isActive ? "is-active" : ""}`;
@@ -140,7 +151,10 @@ function SiteNav({ favoritesCount, watchlistCount }) {
       </Link>
       <div className="site-nav-links">
         <NavLink className={navClass} to="/" end>
-          Home
+          Movies
+        </NavLink>
+        <NavLink className={navClass} to="/tv">
+          TV Series
         </NavLink>
         <NavLink className={navClass} to="/favorites">
           Favorites
@@ -165,16 +179,22 @@ function MovieCard({
   removeLabel,
   showRecommendationInfo = false,
 }) {
-  const releaseYear = movie.release_date
-    ? movie.release_date.slice(0, 4)
+  const isTV =
+    movie.media_type === "tv" || (!movie.title && Boolean(movie.name));
+  const mediaType = isTV ? "tv" : "movie";
+  const title = movie.title || movie.name || "Untitled";
+  const releaseYear = (movie.release_date || movie.first_air_date)
+    ? (movie.release_date || movie.first_air_date).slice(0, 4)
     : "Year unavailable";
   const rating =
-    typeof movie.vote_average === "number"
+    typeof movie.vote_average === "number" && movie.vote_average > 0
       ? movie.vote_average.toFixed(1)
       : "NR";
   const matchScore =
     typeof movie.match_score === "number"
       ? Math.max(0, Math.min(100, Math.round(movie.match_score)))
+      : typeof movie.similarity_score === "number"
+      ? Math.max(0, Math.min(100, Math.round(movie.similarity_score * 100)))
       : 0;
   const reasons = Array.isArray(movie.reasons)
     ? movie.reasons.filter((reason) => typeof reason === "string" && reason)
@@ -188,7 +208,7 @@ function MovieCard({
         {movie.poster_url ? (
           <img
             src={movie.poster_url}
-            alt={`${movie.title} poster`}
+            alt={`${title} poster`}
             loading="lazy"
           />
         ) : (
@@ -197,13 +217,14 @@ function MovieCard({
             role="img"
             aria-label="No poster available"
           >
-            <FilmIcon />
+            {isTV ? <TvIcon /> : <FilmIcon />}
             <span>No Poster</span>
           </div>
         )}
+        {isTV && <span className="media-type-badge tv-badge">TV Series</span>}
       </div>
       <div className="movie-details">
-        <h3 title={movie.title}>{movie.title}</h3>
+        <h3 title={title}>{title}</h3>
         <div className="movie-meta">
           <span>{releaseYear}</span>
           <span aria-label={`TMDB rating ${rating} out of 10`}>
@@ -240,12 +261,13 @@ function MovieCard({
   );
 
   const canSave = movie.id != null;
-  const favoriteIsActive = canSave && collections.isFavorite(movie.id);
-  const watchlistIsActive = canSave && collections.isWatchlisted(movie.id);
+  const itemWithMedia = { ...movie, media_type: mediaType, title, name: title };
+  const favoriteIsActive = canSave && collections.isFavorite(itemWithMedia);
+  const watchlistIsActive = canSave && collections.isWatchlisted(itemWithMedia);
 
   return (
     <article className="movie-card">
-      <div className="card-save-actions" aria-label="Save movie">
+      <div className="card-save-actions" aria-label="Save title">
         <button
           className={`card-save-button favorite-button ${
             favoriteIsActive ? "is-active" : ""
@@ -260,10 +282,10 @@ function MovieCard({
               ? favoriteIsActive
                 ? "Remove from favorites"
                 : "Add to favorites"
-              : "Movie ID unavailable"
+              : "ID unavailable"
           }
           disabled={!canSave}
-          onClick={() => collections.toggleFavorite(movie)}
+          onClick={() => collections.toggleFavorite(itemWithMedia)}
         >
           <HeartIcon />
         </button>
@@ -283,10 +305,10 @@ function MovieCard({
               ? watchlistIsActive
                 ? "Remove from watchlist"
                 : "Add to watchlist"
-              : "Movie ID unavailable"
+              : "ID unavailable"
           }
           disabled={!canSave}
-          onClick={() => collections.toggleWatchlist(movie)}
+          onClick={() => collections.toggleWatchlist(itemWithMedia)}
         >
           <BookmarkIcon />
         </button>
@@ -295,8 +317,8 @@ function MovieCard({
       {movie.id ? (
         <Link
           className="movie-card-main movie-card-link"
-          to={`/movie/${movie.id}`}
-          aria-label={`View details for ${movie.title}`}
+          to={isTV ? `/tv/${movie.id}` : `/movie/${movie.id}`}
+          aria-label={`View details for ${title}`}
         >
           {content}
         </Link>
@@ -308,7 +330,7 @@ function MovieCard({
         <button
           className="card-remove-button"
           type="button"
-          onClick={() => onRemove(movie.id)}
+          onClick={() => onRemove(itemWithMedia)}
         >
           <TrashIcon /> {removeLabel}
         </button>
@@ -567,9 +589,24 @@ function Home({ activity, collections }) {
   const handleSearchChange = (event) => {
     const value = event.target.value;
     setSearchTerm(value);
-    setSelectedMovie(value);
-    setIsSuggestionsOpen(Boolean(value.trim()));
-    setActiveSuggestion(-1);
+
+    if (!value.trim()) {
+      setSelectedMovie("");
+      setRecommendations([]);
+      setIsRecommending(false);
+      setError("");
+      setIsSuggestionsOpen(false);
+      setActiveSuggestion(-1);
+      setRecommendationContext({ movieTitle: "", genre: selectedGenre });
+      if (activeRecommendationRequest.current?.controller) {
+        activeRecommendationRequest.current.controller.abort();
+        activeRecommendationRequest.current = null;
+      }
+    } else {
+      setSelectedMovie(value);
+      setIsSuggestionsOpen(true);
+      setActiveSuggestion(-1);
+    }
   };
 
   const handleSearchKeyDown = (event) => {
@@ -626,7 +663,12 @@ function Home({ activity, collections }) {
     event.preventDefault();
 
     const movieTitle = selectedMovie.trim();
-    if (!movieTitle) return;
+    if (!movieTitle) {
+      setRecommendations([]);
+      setIsRecommending(false);
+      setError("");
+      return;
+    }
 
     const requestKey = `${movieTitle}::${selectedGenre}`;
     const currentRequest = activeRecommendationRequest.current;
@@ -733,25 +775,35 @@ function Home({ activity, collections }) {
     0,
     visibleTrendingCount,
   );
-  const recentlyViewedKey = activity.recentlyViewed
+  const movieRecentlyViewed = useMemo(
+    () => activity.recentlyViewed.filter((item) => item.media_type !== "tv"),
+    [activity.recentlyViewed],
+  );
+  const movieRecommendationHistory = useMemo(
+    () =>
+      activity.recommendationHistory.filter((item) => item.media_type !== "tv"),
+    [activity.recommendationHistory],
+  );
+
+  const recentlyViewedKey = movieRecentlyViewed
     .map((movie) => movie.id)
     .join("|");
   const visibleRecentCount =
     recentPagination.key === recentlyViewedKey
       ? recentPagination.count
       : INITIAL_VISIBLE_MOVIE_CARDS;
-  const visibleRecentlyViewed = activity.recentlyViewed.slice(
+  const visibleRecentlyViewed = movieRecentlyViewed.slice(
     0,
     visibleRecentCount,
   );
-  const historyItemsKey = activity.recommendationHistory
+  const historyItemsKey = movieRecommendationHistory
     .map((item) => `${item.searchedMovie}:${item.selectedGenre}:${item.createdAt}`)
     .join("|");
   const visibleHistoryCount =
     historyPagination.key === historyItemsKey
       ? historyPagination.count
       : INITIAL_VISIBLE_HISTORY_ITEMS;
-  const visibleHistoryItems = activity.recommendationHistory.slice(
+  const visibleHistoryItems = movieRecommendationHistory.slice(
     0,
     visibleHistoryCount,
   );
@@ -766,6 +818,19 @@ function Home({ activity, collections }) {
           favoritesCount={collections.favorites.length}
           watchlistCount={collections.watchlist.length}
         />
+
+        <div className="media-switcher-wrapper">
+          <nav className="media-switcher" aria-label="Media format selector">
+            <div className="media-switch-pill is-active" aria-current="page">
+              <FilmIcon />
+              <span>Movies</span>
+            </div>
+            <Link className="media-switch-pill" to="/tv">
+              <TvIcon />
+              <span>TV Series</span>
+            </Link>
+          </nav>
+        </div>
         <header className="hero-copy">
           <div className="brand-mark" aria-hidden="true">
             <FilmIcon />
@@ -813,6 +878,16 @@ function Home({ activity, collections }) {
                       : undefined
                   }
                   onChange={handleSearchChange}
+                  onInput={(event) => {
+                    if (!event.target.value.trim()) {
+                      handleSearchChange(event);
+                    }
+                  }}
+                  onSearch={(event) => {
+                    if (!event.target.value.trim()) {
+                      handleSearchChange(event);
+                    }
+                  }}
                   onFocus={() =>
                     setIsSuggestionsOpen(Boolean(searchQuery))
                   }
@@ -1050,7 +1125,7 @@ function Home({ activity, collections }) {
           )}
         </section>
 
-        {activity.recentlyViewed.length > 0 && (
+        {movieRecentlyViewed.length > 0 && (
           <section className="results recently-viewed-section">
             <div className="results-heading">
               <div>
@@ -1058,7 +1133,7 @@ function Home({ activity, collections }) {
                 <h2>Recently Viewed</h2>
               </div>
               <span className="result-count">
-                {activity.recentlyViewed.length} recent
+                {movieRecentlyViewed.length} recent
               </span>
             </div>
 
@@ -1074,13 +1149,13 @@ function Home({ activity, collections }) {
 
             <LoadMoreButton
               visibleCount={visibleRecentCount}
-              totalCount={activity.recentlyViewed.length}
+              totalCount={movieRecentlyViewed.length}
               onLoadMore={() =>
                 setRecentPagination({
                   key: recentlyViewedKey,
                   count: Math.min(
                     visibleRecentCount + MOVIE_LOAD_STEP,
-                    activity.recentlyViewed.length,
+                    movieRecentlyViewed.length,
                   ),
                 })
               }
@@ -1094,18 +1169,18 @@ function Home({ activity, collections }) {
               <p className="section-kicker">Return to an earlier search</p>
               <h2>Recommendation History</h2>
             </div>
-            {activity.recommendationHistory.length > 0 && (
+            {movieRecommendationHistory.length > 0 && (
               <button
                 className="clear-history-button"
                 type="button"
-                onClick={activity.clearRecommendationHistory}
+                onClick={() => activity.clearRecommendationHistory("movie")}
               >
                 <TrashIcon /> Clear all history
               </button>
             )}
           </div>
 
-          {activity.recommendationHistory.length > 0 ? (
+          {movieRecommendationHistory.length > 0 ? (
             <div className="history-grid">
               {visibleHistoryItems.map((item) => (
                 <article
@@ -1168,7 +1243,7 @@ function Home({ activity, collections }) {
 
           <LoadMoreButton
             visibleCount={visibleHistoryCount}
-            totalCount={activity.recommendationHistory.length}
+            totalCount={movieRecommendationHistory.length}
             step={HISTORY_LOAD_STEP}
             label="Load More History"
             onLoadMore={() =>
@@ -1176,7 +1251,7 @@ function Home({ activity, collections }) {
                 key: historyItemsKey,
                 count: Math.min(
                   visibleHistoryCount + HISTORY_LOAD_STEP,
-                  activity.recommendationHistory.length,
+                  movieRecommendationHistory.length,
                 ),
               })
             }
@@ -1194,19 +1269,28 @@ function Home({ activity, collections }) {
 
 function SavedMoviesPage({ collection, collections }) {
   const isFavoritesPage = collection === "favorites";
-  const movies = isFavoritesPage
+  const allMedia = isFavoritesPage
     ? collections.favorites
     : collections.watchlist;
+  const [mediaFilter, setMediaFilter] = useState("all");
+
+  const movies = allMedia.filter((item) => {
+    if (mediaFilter === "all") return true;
+    const isTV =
+      item.media_type === "tv" || (!item.title && Boolean(item.name));
+    return mediaFilter === "tv" ? isTV : !isTV;
+  });
+
   const title = isFavoritesPage ? "Your Favorites" : "Your Watchlist";
   const subtitle = isFavoritesPage
-    ? "The movies you loved, all in one place."
-    : "A hand-picked queue for your next movie night.";
+    ? "The stories and series you loved, all in one place."
+    : "A hand-picked queue for your next watch.";
   const emptyTitle = isFavoritesPage
     ? "No favorites yet"
     : "Your watchlist is empty";
   const emptyMessage = isFavoritesPage
-    ? "Tap the heart on any movie card to save it here."
-    : "Tap the bookmark on a movie card to build your watchlist.";
+    ? "Tap the heart on any movie or TV series card to save it here."
+    : "Tap the bookmark on a movie or TV series card to build your watchlist.";
   const removeMovie = isFavoritesPage
     ? collections.removeFavorite
     : collections.removeFromWatchlist;
@@ -1214,7 +1298,7 @@ function SavedMoviesPage({ collection, collections }) {
     key: "",
     count: INITIAL_VISIBLE_MOVIE_CARDS,
   });
-  const collectionKey = `${collection}:${movies
+  const collectionKey = `${collection}:${mediaFilter}:${movies
     .map((movie) => movie.id)
     .join("|")}`;
   const visibleMovieCount =
@@ -1222,6 +1306,13 @@ function SavedMoviesPage({ collection, collections }) {
       ? collectionPagination.count
       : INITIAL_VISIBLE_MOVIE_CARDS;
   const visibleMovies = movies.slice(0, visibleMovieCount);
+
+  const moviesCount = allMedia.filter(
+    (item) => item.media_type !== "tv" && !(!item.title && Boolean(item.name)),
+  ).length;
+  const tvCount = allMedia.filter(
+    (item) => item.media_type === "tv" || (!item.title && Boolean(item.name)),
+  ).length;
 
   return (
     <main className="app-shell collection-shell">
@@ -1238,10 +1329,32 @@ function SavedMoviesPage({ collection, collections }) {
           <p className="section-kicker">Your personal cinema</p>
           <h1>{title}</h1>
           <p>{subtitle}</p>
-          {movies.length > 0 && (
-            <span className="collection-count">
-              {movies.length} {movies.length === 1 ? "movie" : "movies"}
-            </span>
+          {allMedia.length > 0 && (
+            <div className="genre-filter-row" style={{ justifyContent: "center", marginTop: "1rem" }}>
+              <div className="genre-chips-container">
+                <button
+                  type="button"
+                  className={`genre-chip ${mediaFilter === "all" ? "is-selected" : ""}`}
+                  onClick={() => setMediaFilter("all")}
+                >
+                  All ({allMedia.length})
+                </button>
+                <button
+                  type="button"
+                  className={`genre-chip ${mediaFilter === "movie" ? "is-selected" : ""}`}
+                  onClick={() => setMediaFilter("movie")}
+                >
+                  Movies ({moviesCount})
+                </button>
+                <button
+                  type="button"
+                  className={`genre-chip ${mediaFilter === "tv" ? "is-selected" : ""}`}
+                  onClick={() => setMediaFilter("tv")}
+                >
+                  TV Series ({tvCount})
+                </button>
+              </div>
+            </div>
           )}
         </header>
 
@@ -1252,13 +1365,13 @@ function SavedMoviesPage({ collection, collections }) {
                 <MovieCard
                   movie={movie}
                   collections={collections}
-                  onRemove={removeMovie}
+                  onRemove={(item) => removeMovie(item)}
                   removeLabel={
                     isFavoritesPage
                       ? "Remove from Favorites"
                       : "Remove from Watchlist"
                   }
-                  key={movie.id}
+                  key={`${movie.media_type || "movie"}-${movie.id}`}
                 />
               ))}
             </div>
@@ -1284,16 +1397,25 @@ function SavedMoviesPage({ collection, collections }) {
             </div>
             <h2>{emptyTitle}</h2>
             <p>{emptyMessage}</p>
-            <Link className="collection-home-button" to="/">
-              Discover movies
-            </Link>
+            <div style={{ display: "flex", gap: "0.75rem", justifyContent: "center", flexWrap: "wrap" }}>
+              <Link className="collection-home-button" to="/">
+                Discover movies
+              </Link>
+              <Link
+                className="collection-home-button"
+                to="/tv"
+                style={{ background: "linear-gradient(135deg, #9333ea, #7c3aed)" }}
+              >
+                Discover TV series
+              </Link>
+            </div>
           </div>
         )}
       </section>
 
       <footer>
         <FilmIcon />
-        <span>Thoughtful picks, one movie at a time.</span>
+        <span>Thoughtful picks, one story at a time.</span>
       </footer>
     </main>
   );
@@ -1308,6 +1430,30 @@ function App() {
       <Route
         path="/"
         element={<Home activity={activity} collections={collections} />}
+      />
+      <Route
+        path="/tv"
+        element={
+          <TVDiscovery
+            activity={activity}
+            collections={collections}
+            navigation={
+              <SiteNav
+                favoritesCount={collections.favorites.length}
+                watchlistCount={collections.watchlist.length}
+              />
+            }
+          />
+        }
+      />
+      <Route
+        path="/tv/:id"
+        element={
+          <TVDetails
+            collections={collections}
+            onSeriesViewed={activity.addRecentlyViewed}
+          />
+        }
       />
       <Route
         path="/favorites"

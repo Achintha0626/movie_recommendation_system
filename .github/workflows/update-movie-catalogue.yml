@@ -57,33 +57,53 @@ jobs:
           TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
         run: python scripts/incremental_update.py
 
-      - name: Check whether catalogue changed
+      - name: Incrementally update TV series catalogue
+        working-directory: backend
+        env:
+          TMDB_API_KEY: ${{ secrets.TMDB_API_KEY }}
+        run: python scripts/build_tv_catalogue.py --incremental
+
+      - name: Check whether catalogues changed
         id: catalogue_changes
         run: |
-          changes="$(git status --porcelain -- \
+          movie_changes="$(git status --porcelain -- \
             backend/dumped_obj/movie_dataframe_for_app.csv \
             backend/dumped_obj/movie_data_for_app.csv)"
+          tv_changes="$(git status --porcelain -- \
+            backend/dumped_obj/tv/tv_catalogue.csv)"
 
-          if [ -z "$changes" ]; then
-            echo "changed=false" >> "$GITHUB_OUTPUT"
-            echo "No catalogue changes detected."
+          if [ -n "$movie_changes" ]; then
+            echo "movie_changed=true" >> "$GITHUB_OUTPUT"
           else
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-            echo "Catalogue changes detected."
+            echo "movie_changed=false" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Rebuild metadata similarity matrix
-        if: steps.catalogue_changes.outputs.changed == 'true'
+          if [ -n "$tv_changes" ]; then
+            echo "tv_changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "tv_changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          if [ -n "$movie_changes" ] || [ -n "$tv_changes" ]; then
+            echo "any_changed=true" >> "$GITHUB_OUTPUT"
+            echo "Catalogue changes detected."
+          else
+            echo "any_changed=false" >> "$GITHUB_OUTPUT"
+            echo "No catalogue changes detected."
+          fi
+
+      - name: Rebuild movie similarity matrix
+        if: steps.catalogue_changes.outputs.movie_changed == 'true'
         working-directory: backend
         run: python rebuild_similarity.py
 
-      - name: Rebuild semantic embeddings
-        if: steps.catalogue_changes.outputs.changed == 'true'
+      - name: Rebuild movie semantic embeddings
+        if: steps.catalogue_changes.outputs.movie_changed == 'true'
         working-directory: backend
         run: python services/embedding_service.py
 
       - name: Validate generated catalogue artifacts
-        if: steps.catalogue_changes.outputs.changed == 'true'
+        if: steps.catalogue_changes.outputs.any_changed == 'true'
         working-directory: backend
         run: |
           python - <<'PY'
@@ -96,13 +116,14 @@ jobs:
 
           base = Path("dumped_obj")
 
+          # --- Validate Movie Artifacts ---
           dataframe_path = base / "movie_dataframe_for_app.csv"
           app_data_path = base / "movie_data_for_app.csv"
           similarity_path = base / "sigmoid_kernel.pkl"
           embeddings_path = base / "semantic_embeddings.pkl"
           metadata_path = base / "embedding_metadata.json"
 
-          required_files = [
+          movie_files = [
               dataframe_path,
               app_data_path,
               similarity_path,
@@ -110,11 +131,10 @@ jobs:
               metadata_path,
           ]
 
-          missing = [str(path) for path in required_files if not path.exists()]
-
-          if missing:
-              print("Missing generated files:")
-              for path in missing:
+          missing_movies = [str(path) for path in movie_files if not path.exists()]
+          if missing_movies:
+              print("Missing movie files:")
+              for path in missing_movies:
                   print(f"- {path}")
               sys.exit(1)
 
@@ -155,31 +175,79 @@ jobs:
                   f"metadata={metadata.get('movie_count')}, movies={movie_count}"
               )
 
-          print("Catalogue artifact validation passed.")
+          print("Movie catalogue validation passed.")
           print(f"Movie rows: {movie_count}")
           print(f"Similarity shape: {similarity.shape}")
           print(f"Embedding shape: {embeddings.shape}")
+
+          # --- Validate TV Artifacts ---
+          tv_base = base / "tv"
+          tv_catalogue_path = tv_base / "tv_catalogue.csv"
+          tv_embeddings_path = tv_base / "tv_semantic_embeddings.pkl"
+          tv_metadata_path = tv_base / "tv_embedding_metadata.json"
+
+          tv_files = [tv_catalogue_path, tv_embeddings_path, tv_metadata_path]
+          missing_tv = [str(path) for path in tv_files if not path.exists()]
+          if missing_tv:
+              print("Missing TV files:")
+              for path in missing_tv:
+                  print(f"- {path}")
+              sys.exit(1)
+
+          tv_df = pd.read_csv(tv_catalogue_path)
+          tv_emb = joblib.load(tv_embeddings_path)
+          with tv_metadata_path.open("r", encoding="utf-8") as file:
+              tv_meta = json.load(file)
+
+          tv_count = len(tv_df)
+          if tv_count == 0:
+              raise SystemExit("TV catalogue must not be empty.")
+
+          if getattr(tv_emb, "ndim", None) != 2:
+              raise SystemExit("TV embeddings must be a 2D matrix.")
+
+          if tv_emb.shape[0] != tv_count or tv_emb.shape[1] != 384:
+              raise SystemExit(
+                  f"TV embedding shape mismatch: expected ({tv_count}, 384), got {tv_emb.shape}"
+              )
+
+          if tv_meta.get("series_count") != tv_count:
+              raise SystemExit(
+                  f"TV metadata count mismatch: {tv_meta.get('series_count')} vs {tv_count}"
+              )
+
+          if "id" in tv_df.columns:
+              dup_count = tv_df["id"].dropna().astype(int).duplicated().sum()
+              if dup_count > 0:
+                  raise SystemExit(f"Duplicate TV IDs detected: {dup_count}")
+
+          print("TV catalogue validation passed.")
+          print(f"TV series rows: {tv_count}")
+          print(f"TV embedding shape: {tv_emb.shape}")
           PY
 
       - name: Configure git author
-        if: steps.catalogue_changes.outputs.changed == 'true'
+        if: steps.catalogue_changes.outputs.any_changed == 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
       - name: Commit generated catalogue artifacts
-        if: steps.catalogue_changes.outputs.changed == 'true'
+        if: steps.catalogue_changes.outputs.any_changed == 'true'
         run: |
           git add \
             backend/dumped_obj/movie_dataframe_for_app.csv \
             backend/dumped_obj/movie_data_for_app.csv \
             backend/dumped_obj/sigmoid_kernel.pkl \
             backend/dumped_obj/semantic_embeddings.pkl \
-            backend/dumped_obj/embedding_metadata.json
+            backend/dumped_obj/embedding_metadata.json \
+            backend/dumped_obj/tv/tv_catalogue.csv \
+            backend/dumped_obj/tv/tv_semantic_embeddings.pkl \
+            backend/dumped_obj/tv/tv_embedding_metadata.json
 
           if git diff --cached --quiet; then
             echo "No generated changes to commit."
           else
-            git commit -m "chore: update movie catalogue and recommendation artifacts"
+            git commit -m "chore: update movie and tv catalogues and recommendation artifacts"
             git push
           fi
