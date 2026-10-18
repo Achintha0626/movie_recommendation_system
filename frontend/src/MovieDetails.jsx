@@ -221,6 +221,12 @@ function MovieDetails({ onMovieViewed }) {
             <ArrowLeftIcon /> Back to Home
           </Link>
           <div className="details-nav-right">
+            <Link className="details-nav-link" to="/">
+              Movies
+            </Link>
+            <Link className="details-nav-link" to="/tv">
+              TV Series
+            </Link>
             <Link className="details-nav-link" to="/favorites">
               Favorites
             </Link>

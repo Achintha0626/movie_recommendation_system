@@ -1,0 +1,363 @@
+/* ==========================================================================
+   CineMatch TV Series Page Styles (Glassmorphism & Dark Violet Aesthetic)
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   1. Media Format Switcher (Movies / TV Series)
+   -------------------------------------------------------------------------- */
+.media-switcher-wrapper {
+  display: flex;
+  justify-content: center;
+  margin-top: clamp(0.5rem, 2vw, 1.25rem);
+  margin-bottom: 0.5rem;
+}
+
+.media-switcher {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px;
+  gap: 6px;
+  background: rgba(18, 14, 28, 0.72);
+  border: 1px solid rgba(192, 132, 252, 0.2);
+  border-radius: 999px;
+  backdrop-filter: blur(16px);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+}
+
+.media-switch-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  min-height: 38px;
+  padding: 0.45rem 1.15rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #9f93ab;
+  text-decoration: none;
+  transition: color 180ms ease, background 180ms ease, box-shadow 180ms ease, transform 180ms ease;
+  user-select: none;
+  box-sizing: border-box;
+}
+
+.media-switch-pill svg {
+  width: 17px;
+  height: 17px;
+}
+
+.media-switch-pill:hover {
+  color: #f0eaf5;
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.media-switch-pill.is-active {
+  color: #ffffff;
+  background: linear-gradient(135deg, #9333ea, #7c3aed);
+  box-shadow: 0 4px 18px rgba(124, 58, 237, 0.4);
+}
+
+/* --------------------------------------------------------------------------
+   2. Hero Section & Recommendation Search Form
+   -------------------------------------------------------------------------- */
+.tv-hero-search {
+  margin-top: clamp(1.5rem, 4vw, 2.75rem);
+}
+
+.tv-hero-search label {
+  display: block;
+  margin: 0 0 0.65rem 0.15rem;
+  color: #e9e3f3;
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+/* Autocomplete Suggestion Items with Thumbnails */
+.tv-suggestion-item {
+  display: flex;
+  align-items: center;
+  gap: 0.85rem;
+  padding: 0.5rem 0.75rem;
+}
+
+.suggestion-thumbnail {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 46px;
+  border-radius: 6px;
+  overflow: hidden;
+  background: rgba(10, 6, 18, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  flex-shrink: 0;
+  color: #a855f7;
+}
+
+.suggestion-thumbnail img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.suggestion-thumbnail svg {
+  width: 18px;
+  height: 18px;
+  opacity: 0.7;
+}
+
+.suggestion-info {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+  text-align: left;
+}
+
+.suggestion-title {
+  font-size: 0.86rem;
+  font-weight: 700;
+  color: #f3eff9;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.suggestion-meta {
+  font-size: 0.72rem;
+  color: #a89bb8;
+  font-weight: 500;
+}
+
+/* --------------------------------------------------------------------------
+   3. Recommendations Section
+   -------------------------------------------------------------------------- */
+.recommendations-heading-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.clear-recommendations-btn {
+  background: none;
+  border: 1px solid rgba(192, 132, 252, 0.25);
+  border-radius: 8px;
+  padding: 0.3rem 0.7rem;
+  color: #c084fc;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 160ms ease;
+}
+
+.clear-recommendations-btn:hover {
+  color: #ffffff;
+  background: rgba(147, 51, 234, 0.25);
+  border-color: rgba(192, 132, 252, 0.5);
+}
+
+/* --------------------------------------------------------------------------
+   4. Trending Section
+   -------------------------------------------------------------------------- */
+.trending-heading-row {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  margin-bottom: 1.25rem;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+
+.trending-heading-row h2 {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.trending-heading-row h2 svg {
+  width: 22px;
+  height: 22px;
+  color: #f87171;
+}
+
+.trending-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.28rem 0.75rem;
+  background: rgba(239, 68, 68, 0.15);
+  border: 1px solid rgba(239, 68, 68, 0.32);
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 750;
+  color: #fca5a5;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+/* --------------------------------------------------------------------------
+   5. TV Card Styling Refinements
+   -------------------------------------------------------------------------- */
+.tv-card {
+  display: flex;
+  flex-direction: column;
+}
+
+.tv-card .poster-art {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 2 / 3;
+  overflow: hidden;
+  background: #0f0a1c;
+  border-radius: 17px 17px 0 0;
+}
+
+.tv-badge {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  padding: 0.2rem 0.55rem;
+  font-size: 0.65rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  background: rgba(124, 58, 237, 0.88);
+  color: #fbf9ff;
+  border-radius: 6px;
+  backdrop-filter: blur(8px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+  z-index: 2;
+  pointer-events: none;
+}
+
+.tv-card .movie-details {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  padding: 1.1rem 1.15rem 1.25rem;
+}
+
+.tv-card .movie-details h3 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-size: 1.05rem;
+  font-weight: 750;
+  line-height: 1.35;
+  margin: 0 0 0.5rem;
+  min-height: 2.7em;
+  color: #f5effb;
+}
+
+.tv-card .movie-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  margin-bottom: 0.5rem;
+  font-size: 0.78rem;
+  color: #b3a7c2;
+  flex-wrap: wrap;
+}
+
+.season-pill {
+  padding: 0.15rem 0.5rem;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+  font-size: 0.68rem;
+  font-weight: 650;
+  color: #c4b5fd;
+}
+
+.tv-card-genres {
+  font-size: 0.72rem;
+  color: #a89bb8;
+  margin: 0 0 0.55rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.tv-card .movie-overview {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  font-size: 0.81rem;
+  line-height: 1.5;
+  color: #9f93ab;
+  margin-bottom: 0.85rem;
+}
+
+.tv-card .card-action {
+  margin-top: auto;
+  padding-top: 0.5rem;
+  font-size: 0.78rem;
+  font-weight: 750;
+  color: #c084fc;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  transition: color 160ms ease, transform 160ms ease;
+}
+
+.tv-card:hover .card-action {
+  color: #e9d5ff;
+  transform: translateX(3px);
+}
+
+/* --------------------------------------------------------------------------
+   6. States: Error & Empty Views
+   -------------------------------------------------------------------------- */
+.tv-error-box {
+  padding: 1.5rem;
+  background: rgba(239, 68, 68, 0.09);
+  border: 1px solid rgba(239, 68, 68, 0.28);
+  border-radius: 14px;
+  text-align: center;
+  color: #fca5a5;
+  margin-block: 1.5rem;
+}
+
+.tv-error-box p {
+  margin: 0 0 1rem 0;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.tv-empty-box {
+  margin-block: 2.25rem;
+  text-align: center;
+}
+
+.tv-empty-box h3 {
+  color: #f3eff9;
+  margin: 0.5rem 0;
+}
+
+.tv-empty-box p {
+  color: #9f93ab;
+  max-width: 440px;
+  margin: 0 auto 1.25rem auto;
+  font-size: 0.88rem;
+  line-height: 1.5;
+}
+
+/* --------------------------------------------------------------------------
+   7. Responsive Breakpoints
+   -------------------------------------------------------------------------- */
+@media (max-width: 768px) {
+  .trending-heading-row {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
+@media (max-width: 390px) {
+  .media-switch-pill {
+    padding: 0.4rem 0.85rem;
+    font-size: 0.76rem;
+  }
+}

@@ -1635,6 +1635,76 @@ footer svg {
   }
 }
 
+/* Media switcher & TV badge global tokens */
+.media-switcher-wrapper {
+  display: flex;
+  justify-content: center;
+  margin-top: clamp(0.5rem, 2vw, 1.25rem);
+  margin-bottom: 0.5rem;
+}
+
+.media-switcher {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px;
+  gap: 6px;
+  background: rgba(18, 14, 28, 0.72);
+  border: 1px solid rgba(192, 132, 252, 0.2);
+  border-radius: 999px;
+  backdrop-filter: blur(16px);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+}
+
+.media-switch-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  min-height: 38px;
+  padding: 0.45rem 1.15rem;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #9f93ab;
+  text-decoration: none;
+  transition: color 180ms ease, background 180ms ease, box-shadow 180ms ease, transform 180ms ease;
+  user-select: none;
+  box-sizing: border-box;
+}
+
+.media-switch-pill svg {
+  width: 17px;
+  height: 17px;
+}
+
+.media-switch-pill:hover {
+  color: #f0eaf5;
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.media-switch-pill.is-active {
+  color: #ffffff;
+  background: linear-gradient(135deg, #9333ea, #7c3aed);
+  box-shadow: 0 4px 18px rgba(124, 58, 237, 0.4);
+}
+
+.tv-badge {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  padding: 0.2rem 0.55rem;
+  font-size: 0.65rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  background: rgba(124, 58, 237, 0.85);
+  color: #fbf9ff;
+  border-radius: 6px;
+  backdrop-filter: blur(8px);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  z-index: 2;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -1645,3 +1715,4 @@ footer svg {
     transition-duration: 0.01ms !important;
   }
 }
+

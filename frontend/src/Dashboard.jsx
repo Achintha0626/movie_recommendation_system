@@ -190,14 +190,14 @@ function Dashboard({ activity, collections, navigation }) {
 
   const summaryCards = [
     {
-      label: "Favorite Movies",
+      label: "Favorite Titles",
       count: collections.favorites.length,
       icon: <HeartIcon />,
       to: "/favorites",
       tone: "rose",
     },
     {
-      label: "Watchlist Movies",
+      label: "Watchlist Titles",
       count: collections.watchlist.length,
       icon: <BookmarkIcon />,
       to: "/watchlist",
@@ -398,27 +398,40 @@ function Dashboard({ activity, collections, navigation }) {
                 <div className="latest-activity-column">
                   <h3>Recently viewed</h3>
                   {activity.recentlyViewed.length > 0 ? (
-                    activity.recentlyViewed.slice(0, 5).map((movie) => (
-                      <Link
-                        className="recent-activity-item"
-                        to={`/movie/${movie.id}`}
-                        key={movie.id}
-                      >
-                        <span>
-                          {movie.poster_url ? (
-                            <img src={movie.poster_url} alt="" />
-                          ) : (
-                            <FilmIcon />
-                          )}
-                        </span>
-                        <div>
-                          <strong>{movie.title}</strong>
-                          <small>Viewed recently</small>
-                        </div>
-                      </Link>
-                    ))
+                    activity.recentlyViewed.slice(0, 5).map((item) => {
+                      const isTV =
+                        item.media_type === "tv" ||
+                        (!item.title && Boolean(item.name));
+                      const title = item.title || item.name || "Untitled";
+                      const toPath = isTV ? `/tv/${item.id}` : `/movie/${item.id}`;
+                      const key = `${isTV ? "tv" : "movie"}-${item.id}`;
+
+                      return (
+                        <Link
+                          className="recent-activity-item"
+                          to={toPath}
+                          key={key}
+                        >
+                          <span>
+                            {item.poster_url ? (
+                              <img src={item.poster_url} alt="" />
+                            ) : (
+                              <FilmIcon />
+                            )}
+                          </span>
+                          <div>
+                            <strong>{title}</strong>
+                            <small>
+                              {isTV
+                                ? "TV Series · Viewed recently"
+                                : "Movie · Viewed recently"}
+                            </small>
+                          </div>
+                        </Link>
+                      );
+                    })
                   ) : (
-                    <p className="activity-column-empty">No movies viewed yet.</p>
+                    <p className="activity-column-empty">No titles viewed yet.</p>
                   )}
                 </div>
 

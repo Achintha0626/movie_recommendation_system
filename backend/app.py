@@ -10,16 +10,18 @@ import joblib
 import pandas as pd
 import requests
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from services.explanation_service import ExplanationService
 from services.hybrid_ranking_service import HybridRankingService
 from services.semantic_similarity_service import SemanticSimilarityService
+from services.tv_recommendation_service import TVRecommendationService
 
 
 BASE_DIR = Path(__file__).resolve().parent
 TMDB_SEARCH_URL = "https://api.themoviedb.org/3/search/movie"
 TMDB_TRENDING_URL = "https://api.themoviedb.org/3/trending/movie/day"
+TMDB_TRENDING_TV_URL = "https://api.themoviedb.org/3/trending/tv/day"
 TMDB_IMAGE_BASE_URL = "https://image.tmdb.org/t/p/w500"
 TMDB_ORIGINAL_IMAGE_BASE_URL = "https://image.tmdb.org/t/p/original"
 
@@ -50,6 +52,14 @@ hybrid_ranking_service = HybridRankingService(
     semantic_similarity_service,
 )
 explanation_service = ExplanationService()
+
+# --- TV series artifacts (optional — graceful if missing, 3,000+ catalogue) ---
+tv_recommendation_service = TVRecommendationService()
+try:
+    tv_available = tv_recommendation_service.load()
+except Exception as e:
+    tv_available = False
+    print(f"Warning: TV recommendation service failed to load: {e}")
 
 indices = (
     pd.Series(data.index.to_numpy(), index=data["original_title"])
@@ -761,6 +771,226 @@ def recommend(movie_title: str, genre: str | None = None):
 @app.get("/movie/{tmdb_id}")
 def movie_details(tmdb_id: int):
     return get_tmdb_movie_details(tmdb_id)
+
+
+# ===================================================================
+# TV Series Endpoints
+# ===================================================================
+
+def _require_tv():
+    """Raise 503 if TV artifacts are not loaded."""
+    if not tv_available:
+        raise HTTPException(
+            status_code=503,
+            detail="TV series data is not available. Run build_tv_catalogue.py first.",
+        )
+
+
+@app.get("/tv")
+def list_tv_series(
+    page: int = Query(1, ge=1, description="Page number"),
+    page_size: int = Query(20, ge=1, le=100, description="Items per page"),
+):
+    """List TV series from the local catalogue with pagination."""
+    _require_tv()
+    return tv_recommendation_service.list_series(page=page, page_size=page_size)
+
+
+# Static routes MUST be registered before the dynamic /tv/{series_id} route.
+
+@app.get("/tv/search")
+def search_tv_series(query: str = "", limit: int = Query(10, ge=1, le=50)):
+    """Search the local TV catalogue by series name."""
+    _require_tv()
+
+    normalized_query = query.strip()
+    if not normalized_query:
+        return {"results": []}
+
+    results = tv_recommendation_service.search(normalized_query, limit=limit)
+    return {"results": results}
+
+
+@app.get("/tv/trending")
+def trending_tv_series():
+    """Fetch trending TV series from TMDB."""
+    if not TMDB_API_KEY or TMDB_API_KEY == "your_key_here":
+        raise HTTPException(
+            status_code=503,
+            detail="TMDB API key is not configured on the backend.",
+        )
+
+    try:
+        response = requests.get(
+            TMDB_TRENDING_TV_URL,
+            params={"api_key": TMDB_API_KEY},
+            timeout=8,
+        )
+        response.raise_for_status()
+        series_list = response.json().get("results") or []
+
+        results = [
+            {
+                "id": series.get("id"),
+                "name": (
+                    series.get("name")
+                    or series.get("original_name")
+                    or "Untitled"
+                ),
+                "poster_url": _tmdb_image_url(series.get("poster_path")),
+                "backdrop_url": _tmdb_image_url(
+                    series.get("backdrop_path"), original=True
+                ),
+                "first_air_date": series.get("first_air_date") or "",
+                "vote_average": series.get("vote_average"),
+                "overview": series.get("overview") or "",
+            }
+            for series in series_list[:12]
+        ]
+        return {"results": results}
+    except requests.HTTPError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail="TMDB could not provide trending TV series right now.",
+        ) from exc
+    except (requests.RequestException, ValueError, TypeError, AttributeError) as exc:
+        raise HTTPException(
+            status_code=502,
+            detail="Unable to fetch trending TV series from TMDB.",
+        ) from exc
+
+
+@app.get("/tv/recommend/{series_id}")
+def recommend_tv_series(series_id: int, limit: int = Query(10, ge=1, le=50)):
+    """Recommend similar TV series based on semantic embeddings."""
+    _require_tv()
+
+    if series_id not in tv_recommendation_service.id_to_index:
+        raise HTTPException(
+            status_code=404,
+            detail=f"TV series with TMDB ID {series_id} not found in catalogue.",
+        )
+
+    recommendations = tv_recommendation_service.recommend(
+        series_id, limit=limit
+    )
+
+    # Look up the query series metadata for the response envelope.
+    query_series = tv_recommendation_service.get_series_by_id(series_id)
+
+    return {
+        "series_id": series_id,
+        "series_name": query_series.get("name") if query_series else None,
+        "recommendations": recommendations,
+    }
+
+
+@app.get("/tv/{series_id}")
+def tv_series_details(series_id: int):
+    """Fetch TV series details from TMDB."""
+    if not TMDB_API_KEY or TMDB_API_KEY == "your_key_here":
+        raise HTTPException(
+            status_code=503,
+            detail="TMDB API key is not configured on the backend.",
+        )
+
+    try:
+        response = requests.get(
+            f"https://api.themoviedb.org/3/tv/{series_id}",
+            params={
+                "api_key": TMDB_API_KEY,
+                "append_to_response": "aggregate_credits,videos",
+            },
+            timeout=8,
+        )
+        response.raise_for_status()
+        series = response.json()
+
+        credits = series.get("aggregate_credits") or {}
+        cast_members = credits.get("cast") or []
+        videos = (series.get("videos") or {}).get("results") or []
+
+        creators = [
+            person.get("name")
+            for person in (series.get("created_by") or [])
+            if person.get("name")
+        ]
+
+        trailer = next(
+            (
+                video
+                for video in videos
+                if video.get("site") == "YouTube"
+                and video.get("type") == "Trailer"
+                and video.get("key")
+            ),
+            None,
+        )
+
+        cast = [
+            {
+                "name": member.get("name") or "Unknown",
+                "character": (
+                    (member.get("roles") or [{}])[0].get("character", "")
+                    if member.get("roles")
+                    else ""
+                ),
+                "profile_url": _tmdb_image_url(member.get("profile_path")),
+            }
+            for member in cast_members[:6]
+        ]
+
+        return {
+            "id": series.get("id") or series_id,
+            "name": series.get("name") or "Untitled",
+            "poster_url": _tmdb_image_url(series.get("poster_path")),
+            "backdrop_url": _tmdb_image_url(
+                series.get("backdrop_path"), original=True
+            ),
+            "first_air_date": series.get("first_air_date") or "",
+            "last_air_date": series.get("last_air_date") or "",
+            "number_of_seasons": series.get("number_of_seasons"),
+            "number_of_episodes": series.get("number_of_episodes"),
+            "status": series.get("status") or "",
+            "vote_average": series.get("vote_average"),
+            "overview": series.get("overview") or "",
+            "genres": [
+                genre.get("name")
+                for genre in (series.get("genres") or [])
+                if genre.get("name")
+            ],
+            "created_by": creators,
+            "cast": cast,
+            "networks": [
+                {
+                    "name": network.get("name"),
+                    "logo_url": _tmdb_image_url(network.get("logo_path")),
+                }
+                for network in (series.get("networks") or [])
+                if network.get("name")
+            ],
+            "trailer_url": (
+                f"https://www.youtube.com/watch?v={trailer['key']}"
+                if trailer
+                else None
+            ),
+        }
+    except requests.HTTPError as exc:
+        status_code = getattr(exc.response, "status_code", None)
+        if status_code == 404:
+            raise HTTPException(
+                status_code=404,
+                detail="TV series not found on TMDB.",
+            ) from exc
+        raise HTTPException(
+            status_code=502,
+            detail="TMDB could not provide TV series details right now.",
+        ) from exc
+    except (requests.RequestException, ValueError, TypeError, AttributeError) as exc:
+        raise HTTPException(
+            status_code=502,
+            detail="Unable to fetch TV series details from TMDB.",
+        ) from exc
 
 
 if __name__ == "__main__":

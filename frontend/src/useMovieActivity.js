@@ -4,18 +4,32 @@ const RECENTLY_VIEWED_KEY = "recentlyViewed";
 const RECOMMENDATION_HISTORY_KEY = "recommendationHistory";
 const MAX_ITEMS = 10;
 
-function movieId(movie) {
-  return movie?.id == null ? null : String(movie.id);
+function activityItemKey(item) {
+  if (!item || item.id == null) return null;
+  const type =
+    item.media_type || (item.name && !item.title ? "tv" : "movie");
+  return `${type}:${item.id}`;
 }
 
 function prepareMovie(movie, includeRecommendationData = false) {
-  if (!movie || !movie.title) return null;
+  if (!movie || (!movie.title && !movie.name)) return null;
+
+  const isTV =
+    movie.media_type === "tv" || (!movie.title && Boolean(movie.name));
+  const media_type = isTV ? "tv" : "movie";
+  const title = movie.title || movie.name || "Untitled";
+  const name = movie.name || movie.title || "Untitled";
+  const release_date = movie.release_date || movie.first_air_date || "";
+  const first_air_date = movie.first_air_date || movie.release_date || "";
 
   const prepared = {
     id: movie.id ?? null,
-    title: movie.title,
+    media_type,
+    title,
+    name,
     poster_url: movie.poster_url || null,
-    release_date: movie.release_date || "",
+    release_date,
+    first_air_date,
     vote_average:
       typeof movie.vote_average === "number" ? movie.vote_average : null,
     overview: movie.overview || "",
@@ -44,35 +58,52 @@ function parseJson(value) {
 }
 
 function normalizeRecentlyViewed(value) {
-  const seenIds = new Set();
+  const seenKeys = new Set();
 
   return parseJson(value)
-    .reduce((movies, movie) => {
-      const prepared = prepareMovie(movie);
-      const id = movieId(prepared);
+    .reduce((items, item) => {
+      const prepared = prepareMovie(item);
+      const key = activityItemKey(prepared);
 
-      if (!prepared || !id || seenIds.has(id)) return movies;
+      if (!prepared || !key || seenKeys.has(key)) return items;
 
-      seenIds.add(id);
-      movies.push(prepared);
-      return movies;
+      seenKeys.add(key);
+      items.push(prepared);
+      return items;
     }, [])
     .slice(0, MAX_ITEMS);
 }
 
 function historyKey(item) {
-  const movie = item.searchedMovie.trim().toLocaleLowerCase();
-  const genre = item.selectedGenre.trim().toLocaleLowerCase();
-  return `${movie}::${genre}`;
+  if (!item) return "";
+  const type =
+    item.media_type || (item.name && !item.title ? "tv" : "movie");
+  const movie = (
+    item.searchedMovie ||
+    item.searchedTitle ||
+    item.name ||
+    item.title ||
+    ""
+  )
+    .trim()
+    .toLocaleLowerCase();
+  const genre = (item.selectedGenre || "All").trim().toLocaleLowerCase();
+  return `${type}::${movie}::${genre}`;
 }
 
 function prepareHistoryItem(item) {
-  if (
-    !item ||
-    typeof item.searchedMovie !== "string" ||
-    !item.searchedMovie.trim() ||
-    !Array.isArray(item.recommendations)
-  ) {
+  const searchedTitle =
+    typeof item?.searchedMovie === "string" && item.searchedMovie.trim()
+      ? item.searchedMovie.trim()
+      : typeof item?.searchedTitle === "string" && item.searchedTitle.trim()
+      ? item.searchedTitle.trim()
+      : typeof item?.name === "string" && item.name.trim()
+      ? item.name.trim()
+      : typeof item?.title === "string" && item.title.trim()
+      ? item.title.trim()
+      : "";
+
+  if (!searchedTitle || !Array.isArray(item?.recommendations)) {
     return null;
   }
 
@@ -80,8 +111,16 @@ function prepareHistoryItem(item) {
     .map((movie) => prepareMovie(movie, true))
     .filter(Boolean);
 
+  const media_type =
+    item.media_type === "tv" ||
+    (recommendations.length > 0 &&
+      recommendations.some((rec) => rec.media_type === "tv"))
+      ? "tv"
+      : "movie";
+
   return {
-    searchedMovie: item.searchedMovie.trim(),
+    media_type,
+    searchedMovie: searchedTitle,
     selectedGenre:
       typeof item.selectedGenre === "string" && item.selectedGenre.trim()
         ? item.selectedGenre.trim()
@@ -156,14 +195,14 @@ export default function useMovieActivity() {
     return () => window.removeEventListener("storage", handleStorage);
   }, []);
 
-  const addRecentlyViewed = useCallback((movie) => {
-    const prepared = prepareMovie(movie);
-    const id = movieId(prepared);
-    if (!prepared || !id) return;
+  const addRecentlyViewed = useCallback((item) => {
+    const prepared = prepareMovie(item);
+    const key = activityItemKey(prepared);
+    if (!prepared || !key) return;
 
-    setRecentlyViewed((movies) => [
+    setRecentlyViewed((items) => [
       prepared,
-      ...movies.filter((savedMovie) => movieId(savedMovie) !== id),
+      ...items.filter((savedItem) => activityItemKey(savedItem) !== key),
     ].slice(0, MAX_ITEMS));
   }, []);
 
@@ -178,15 +217,37 @@ export default function useMovieActivity() {
     ].slice(0, MAX_ITEMS));
   }, []);
 
-  const removeHistoryItem = useCallback((searchedMovie, selectedGenre) => {
-    const key = historyKey({ searchedMovie, selectedGenre });
-    setRecommendationHistory((history) =>
-      history.filter((item) => historyKey(item) !== key),
-    );
-  }, []);
+  const removeHistoryItem = useCallback(
+    (searchedMovie, selectedGenre, mediaType = "movie") => {
+      let target;
+      if (typeof searchedMovie === "object" && searchedMovie !== null) {
+        target = searchedMovie;
+      } else {
+        target = {
+          searchedMovie,
+          selectedGenre,
+          media_type: mediaType,
+        };
+      }
+      const key = historyKey(target);
+      setRecommendationHistory((history) =>
+        history.filter((item) => historyKey(item) !== key),
+      );
+    },
+    [],
+  );
 
-  const clearRecommendationHistory = useCallback(() => {
-    setRecommendationHistory([]);
+  const clearRecommendationHistory = useCallback((mediaType) => {
+    if (
+      typeof mediaType === "string" &&
+      (mediaType === "tv" || mediaType === "movie")
+    ) {
+      setRecommendationHistory((history) =>
+        history.filter((item) => (item.media_type || "movie") !== mediaType),
+      );
+    } else {
+      setRecommendationHistory([]);
+    }
   }, []);
 
   return {
